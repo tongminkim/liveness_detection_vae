@@ -1,310 +1,293 @@
-# AGENTS.md — Time-Domain-Only FIR Tri-Band VAE Plan (LF/BP/HF) with Latent-Level Integration
+# AGENTS.md — FIR Tri-Band VAEs with Latent Integration, Reconstructing in TCN Feature Space (H)
 
-This document defines the multi-agent collaboration plan to deliver a one-class, time-domain-only liveness/deepfake detector using three VAEs operating on FIR-filtered subband sequences: Low (LF), Band-Pass (BP), and High (HF). We explicitly avoid frequency-domain (e.g., STFT) losses. All supervision and consistency constraints are defined in the time domain.
+This plan defines a one-class, time-domain-only liveness/deepfake detection system that:
+- Splits the landmark time series with fixed FIR filters into LF/BP/HF bands.
+- Encodes sequences with a shared TCN into a feature sequence H[t,:].
+- Trains three VAEs (one per band) to reconstruct the encoder features (H), not the raw time-domain coordinates.
+- Integrates the three band latents at the final stage to reconstruct the full-band encoder features (H_raw).
+- Computes all reconstruction and consistency losses strictly in the encoder feature space (H).
 
-Scope summary:
-- Input: lip landmark time series x ∈ R[B, T, K, 2] → reshape to [B, T, C], C = K×2 (optionally concat Δ, Δ²).
-- Fixed, non-learned FIR filters split x → x_LF, x_BP, x_HF (time-domain subbands).
-- Three VAEs (LF-VAE, BP-VAE, HF-VAE), each trained to reconstruct its subband target in time domain.
-- Latent-level integration: final-stage latent fusion of z_LF, z_BP, z_HF → z_INT; small consistency decoder enforces global time-domain reconstruction and cross-band coherence.
-- No frequency-domain features or losses (no STFT/CQT/wavelets in loss). All constraints are time-domain (reconstruction, derivatives, decorrelation, smoothness/sparsity, jitter consistency).
-- One-class training (live only). Scoring is reconstruction-based from time-domain errors.
-
---------------------------------------------------------------------------------
-
-## Architecture at a Glance (Time Domain Only)
-
-- Preprocessing:
-  - Normalize coordinates per sequence or globally (mean/var).
-  - Optional lightweight smoothing (EMA/Kalman); avoid over-smoothing (preserve HF).
-  - Optional temporal derivatives Δx, Δ²x as extra channels.
-
-- FIR tri-band split (fixed, time domain):
-  - FPS = f, Nyquist f_N = f/2.
-  - Recommended bands:
-    - LF: 0–2.5 Hz (low-pass)
-    - BP: 2.5–6 Hz (band-pass)
-    - HF: >6 Hz (high-pass) up to f_N
-  - Filters: Hamming-windowed FIR, taps N≈127 (balanced delay across bands). Offline: zero-phase via symmetric padding; Streaming: matched group delay buffers.
-
-- Encoder and VAEs:
-  - Shared time encoder (TCN) over x or over per-band inputs; heads can be conditioned on shared H[T,D] for stability.
-  - LF-VAE:
-    - Clip-level latent z_LF ∈ R[d_LF] (e.g., 32).
-    - Time-domain decoder reconstructs x̂_LF ≈ x_LF.
-    - Structure regularization favors smooth trajectories.
-  - BP-VAE:
-    - Frame-level or short-window latent z_BP,t ∈ R[d_BP] (e.g., 32–48).
-    - Time-domain decoder reconstructs x̂_BP ≈ x_BP.
-    - Regularization for mid-scale dynamics (moderate smoothness, moderate jerk allowance).
-  - HF-VAE:
-    - Frame-level latent z_HF,t ∈ R[d_HF] (e.g., 64).
-    - Time-domain decoder reconstructs x̂_HF ≈ x_HF.
-    - Regularization emphasizes rapid, small-amplitude variations (encourage detail, avoid oversmoothing).
-
-- Latent-level integration (late fusion):
-  - Integrator combines {z_LF, z_BP, z_HF} → z_INT (clip-level, or short sequence aligned to T).
-  - Fusion strategies (configurable):
-    - Concatenate + MLP (default, simple and robust).
-    - Product-of-Experts Gaussian (for clip-level fusion).
-    - Gated fusion/attention over per-band latents (optional).
-  - Consistency decoder (small TCN/GRU) maps z_INT → x̂_INT ∈ R[B, T, C] to enforce final global reconstruction consistency in time domain.
-
-- Composition constraint:
-  - Band sum consistency: x̂_SUM = x̂_LF + x̂_BP + x̂_HF should approximate x (time-domain).
-  - Optional: x̂_INT should also approximate x; use consistency terms to align x̂_INT and x̂_SUM.
+We do NOT use frequency-domain features or losses. All constraints are time-domain sequences (in feature space).
 
 --------------------------------------------------------------------------------
 
-## Agents, Responsibilities, and Deliverables
+## 1) Architecture Overview (H-space Reconstruction)
+
+Notation
+- x ∈ R[B, T, K, 2]: lip landmarks; reshape to x ∈ R[B, T, C], C=K×2 (optionally concat Δ, Δ² → C’)
+- FIR split (fixed, time-domain only): x → {x_LF, x_BP, x_HF}
+- Shared TCN Encoder E(·): maps a time sequence to feature sequence H ∈ R[B, T, D]
+- Teacher-Student Encoders (for stable H targets):
+  - Teacher encoder E_τ: EMA of student encoder E; produces H* targets; stop-gradient
+  - Student encoder E: feeds band VAEs; updated by backprop
+
+Targets (no gradients through targets)
+- H_raw* = E_τ(x)              ∈ R[B, T, D]
+- H_LF*  = E_τ(x_LF)           ∈ R[B, T, D]
+- H_BP*  = E_τ(x_BP)           ∈ R[B, T, D]
+- H_HF*  = E_τ(x_HF)           ∈ R[B, T, D]
+
+Band encodings for VAE inputs (student)
+- H_LF_in  = E(x_LF)           ∈ R[B, T, D]
+- H_BP_in  = E(x_BP)           ∈ R[B, T, D]
+- H_HF_in  = E(x_HF)           ∈ R[B, T, D]
+
+Band VAEs (time-sequence VAEs in H-space)
+- LF-VAE:
+  - Posterior q(z_LF | H_LF_in) with clip-level latent z_LF ∈ R[d_LF] (e.g., 32)
+  - Decoder D_LF(z_LF, T) → Ĥ_LF ∈ R[B, T, D] (reconstructs H_LF*)
+  - Structural bias: smoothness over time (low-frequency dynamics)
+- BP-VAE:
+  - Posterior q(z_BP,t | H_BP_in) with frame/window latents z_BP,t ∈ R[d_BP] (e.g., 32–48)
+  - Decoder D_BP({z_BP,t}) → Ĥ_BP ∈ R[B, T, D] (reconstructs H_BP*)
+  - Structural bias: moderate smoothness and jerk allowance
+- HF-VAE:
+  - Posterior q(z_HF,t | H_HF_in) with frame latents z_HF,t ∈ R[d_HF] (e.g., 64)
+  - Decoder D_HF({z_HF,t}) → Ĥ_HF ∈ R[B, T, D] (reconstructs H_HF*)
+  - Structural bias: preserve rapid small-amplitude variations (avoid oversmoothing)
+
+Latent-level Integration (late fusion in latent space)
+- Fuse z = {z_LF, z_BP, z_HF} → z_INT (clip-level; concatenate + small MLP or gated fusion)
+- Consistency decoder D_INT(z_INT, T) → Ĥ_INT ∈ R[B, T, D]
+  - Ĥ_INT should approximate H_raw* (global encoded full-band target)
+
+Optional mixing head (to relate band reconstructions to integrated path)
+- Ĥ_MIX = G_MIX(Ĥ_LF, Ĥ_BP, Ĥ_HF) ∈ R[B, T, D] (e.g., 1×1 temporal conv over feature channels)
+  - Encourages compatibility between band-wise reconstructions and integrated reconstruction
+
+Streaming note
+- For online use, employ causal FIR filters (with delay compensation) and causal TCN; teacher E_τ is kept synchronized (EMA) and used for targets at inference as well.
+
+--------------------------------------------------------------------------------
+
+## 2) Agents, Responsibilities, and Deliverables
 
 ### 0) Program Manager (PM) Agent
-- Responsibilities:
-  - Define scope, milestones, and dependencies across agents.
-  - Maintain risk register, weekly reviews, and change control.
-- Deliverables:
-  - Roadmap, RACI, progress dashboards.
-- Acceptance:
-  - Milestones met, blockers triaged within SLA, scope/quality maintained.
+- Responsibilities: Scope, milestones, dependencies; weekly reviews; risk/change control.
+- Deliverables: Roadmap, RACI, status dashboards.
+- Acceptance: Milestones met; blockers resolved within SLA; scope/quality maintained.
 
 ### 1) Data Agent
 - Responsibilities:
-  - Collect/curate video datasets; extract lip landmark sequences x ∈ R[B, T, K, 2].
-  - Normalization stats, optional Δ/Δ² features; sequence windowing (T≈48–64).
-  - Data splits: train (live-only), dev/test (live+spoof if available), domain partitions.
-  - Augmentation (time domain): small jitter (±1f), 5–10% frame drop, speed 0.95–1.05×.
-- Deliverables:
-  - Reproducible datasets (.npy/.pt), metadata (FPS, T, K), augmentation configs.
-- Acceptance:
-  - Deterministic splits; coverage of lip landmarks; validated sequence statistics.
+  - Prepare x ∈ R[B,T,K,2] (and optional Δ,Δ²) with normalization; windowing T≈48–64 at 25–30 fps.
+  - Train/dev/test splits (live-only for train; live+spoof for eval), domain partitions.
+  - Time-domain augmentations: ±1 frame jitter, 5–10% frame drop, 0.95–1.05× speed.
+- Deliverables: Reproducible datasets (.npy/.pt), normalization stats, augmentation configs.
+- Acceptance: Deterministic splits, validated stats, consistent FPS/T across sets.
 
 ### 2) FIR/Signal Processing Agent
 - Responsibilities:
-  - Design and implement fixed FIR filters for LF/BP/HF (time domain only).
-  - Ensure matched delay across bands; provide zero-phase offline variant and causal streaming variant.
-  - Provide utilities for Δ, Δ² computation, total variation, and time-derivative ops.
-- Deliverables:
-  - Filter kernels/taps, reference plots (impulse/step response), and validation checks (band isolation on synthetic signals).
-- Acceptance:
-  - Minimal band leakage; consistent alignment across bands; reproducible, tested utilities.
+  - Design fixed FIR filters for LF: 0–2.5 Hz, BP: 2.5–6 Hz, HF: >6 Hz (up to f_N); Hamming taps N≈127.
+  - Ensure matched group delay across bands; symmetric padding offline, causal buffers for streaming.
+  - Provide utilities for time derivatives (Δ, Δ², jerk) in feature space and in inputs as needed.
+- Deliverables: Filter kernels, validation on synthetic sweeps, delay alignment report.
+- Acceptance: Minimal band leakage; verified delay; deterministic outputs.
 
 ### 3) Model Architect Agent
 - Responsibilities:
-  - Implement shared time encoder (TCN) and three VAE heads (LF/BP/HF).
-    - Shared encoder: dilations [1,2,4,8], channels 64→128 (configurable).
-    - LF-VAE (clip-latent), BP-VAE (frame/window latent), HF-VAE (frame latent).
-    - Heads accept band-specific inputs (x_LF, x_BP, x_HF) and may condition on shared H[T,D].
-  - Implement latent-level integrator:
-    - Fusion of {z_LF, z_BP, z_HF} → z_INT (clip-level by default).
-    - Small consistency decoder mapping z_INT → x̂_INT.
-- Deliverables:
-  - Modular PyTorch components with clear interfaces and unit tests.
-- Acceptance:
-  - Shape correctness, parameter budget reasonable (<~2M baseline), stable forwards.
+  - Implement teacher-student encoders E_τ (EMA) and E (student) with TCN (dilations [1,2,4,8], channels 64→128).
+  - Build LF/BP/HF VAEs in H-space and the integration module (z_INT + D_INT).
+  - Provide a small mixing head G_MIX (optional) for band-to-integrated alignment.
+- Deliverables: Modular PyTorch components, unit tests (shape/grad), config presets.
+- Acceptance: Stable forward pass; parameter budget ≲ 2M; clean interfaces.
 
-### 4) Loss & Training Agent (Time Domain Only)
+### 4) Loss & Training Agent (H-space only)
 - Responsibilities:
-  - Define time-domain-only objectives (no frequency-domain losses):
-    - Band reconstructions:
-      - L_rec^LF = ||x̂_LF − x_LF|| (L1 or L2)
-      - L_rec^BP = ||x̂_BP − x_BP||
-      - L_rec^HF = ||x̂_HF − x_HF||
-    - KL terms (β-VAE style, with warmup 10–20 epochs):
-      - Strong β_LF (e.g., 4–8) to enforce low-capacity smooth representation.
-      - Moderate β_BP (e.g., 1–3).
-      - Weak β_HF (e.g., 0.5–1.0) to preserve fine details.
-    - Band sum consistency:
-      - L_mix = ||x − (x̂_LF + x̂_BP + x̂_HF)||₁
-    - Integration consistency (latent fusion):
-      - L_int = ||x̂_INT − x||₁  and/or  ||x̂_INT − (x̂_LF + x̂_BP + x̂_HF)||₁
-    - Temporal derivative alignment (time-domain dynamics):
-      - L_grad = Σ_{k=1..3} λ_k · ||∇_t^k x̂ − ∇_t^k x||₁   (applied to x̂_SUM or x̂_INT)
-    - Band role separation (time-domain decorrelation):
-      - L_decor = γ · [corr(x̂_LF, x̂_BP)^2 + corr(x̂_LF, x̂_HF)^2 + corr(x̂_BP, x̂_HF)^2] (computed over time and channels)
-      - Optional latent cross-covariance penalty between {z_LF, z_BP, z_HF} (Barlow Twins off-diagonal style) to reduce redundancy.
-    - Structure regularizers:
-      - LF smoothness: TV or second-derivative penalty on x̂_LF (small weight).
-      - HF sparsity-of-amplitude and jerk allowance: small L1 on x̂_HF, but no heavy smoothing (preserve detail).
-      - BP moderate smoothness (between LF and HF).
-    - Jitter consistency (live-only augmentation):
-      - L_jitter = ||x̂_HF(x′) − x̂_HF(x)||₁ + ||x̂_BP(x′) − x̂_BP(x)||₁ (x′ has small temporal jitter/drop)
-  - Training setup:
-    - AdamW (lr 1e-3), cosine decay, batch 16–32, AMP, gradient clipping; early stopping on dev loss.
-- Deliverables:
-  - Loss composition with documented weights; training loop with robust logging and checkpoints.
-- Acceptance:
-  - Stable optimization; no posterior collapse; monotone loss trends; reproducible runs.
+  - Targets: Compute H_* with teacher E_τ and stop-gradient: H_raw*, H_LF*, H_BP*, H_HF*.
+  - Band reconstruction losses (H-space):
+    - L_rec^LF = ||Ĥ_LF − H_LF*||_p
+    - L_rec^BP = ||Ĥ_BP − H_BP*||_p
+    - L_rec^HF = ||Ĥ_HF − H_HF*||_p
+      - p ∈ {1,2}, default p=1 (robust)
+  - KL terms (β-VAE style, with warmup 10–20 epochs):
+    - β_LF (strong, e.g., 4–8), β_BP (moderate, 1–3), β_HF (weak, 0.5–1.0)
+  - Global integration consistency:
+    - L_int_raw = ||Ĥ_INT − H_raw*||_1
+    - Optional band-sum compatibility via mixing:
+      - Ĥ_MIX = G_MIX(Ĥ_LF, Ĥ_BP, Ĥ_HF)
+      - L_int_mix = ||Ĥ_INT − Ĥ_MIX||_1
+  - Temporal dynamics alignment in H-space:
+    - L_grad = Σ_{k=1..3} λ_k · ||∇_t^k(Ĥ_INT) − ∇_t^k(H_raw*)||_1
+      - Optionally add per-band gradient alignment on Ĥ_b vs H_b*
+  - Band role separation (time-domain decorrelation in H-space):
+    - L_decor = γ · [corr_t(Ĥ_LF, Ĥ_BP)^2 + corr_t(Ĥ_LF, Ĥ_HF)^2 + corr_t(Ĥ_BP, Ĥ_HF)^2]
+      - corr_t computed across time and features (batch-averaged)
+    - Optional latent cross-cov penalty among {z_LF, z_BP, z_HF} (off-diagonal Barlow Twins style)
+  - Live-only jitter consistency (H-space):
+    - For a lightly jittered x′ (±1f, drop), compute Ĥ_b(x′) and enforce:
+      - L_jitter = ||Ĥ_BP(x′) − Ĥ_BP(x)||_1 + ||Ĥ_HF(x′) − Ĥ_HF(x)||_1 (small weight)
+  - Total loss (example weights; tune on dev):
+    - L_total = 1.0·L_rec^LF + 0.8·L_rec^BP + 0.6·L_rec^HF
+             + β_LF·KL_LF + β_BP·KL_BP + β_HF·KL_HF
+             + 0.5·L_int_raw + 0.2·L_int_mix
+             + 0.3·L_grad + 0.1·L_decor + 0.1·L_jitter
+  - Optimization:
+    - AdamW (lr 1e-3), cosine decay, batch 16–32, AMP, grad clipping; EMA decay for E_τ (e.g., 0.99→0.999 schedule).
+- Deliverables: Training loop with logging of each loss component; checkpoints; EMA management.
+- Acceptance: Stable convergence; no posterior collapse; smooth loss curves; reproducible runs.
 
-### 5) Metrics & Evaluation Agent
+### 5) Metrics & Evaluation Agent (H-space scoring)
 - Responsibilities:
-  - One-class scoring (time-domain metrics only):
-    - E_LF = ||x_LF − x̂_LF|| (mean/p90/max over time)
-    - E_BP = ||x_BP − x̂_BP||
-    - E_HF = ||x_HF − x̂_HF||
-    - Ratios: E_HF/(E_LF+ε), E_BP/(E_LF+ε)
-    - ΔE under jitter: E_HF(x′) − E_HF(x), E_BP(x′) − E_BP(x)
-    - Optional complexity scores computed in time domain (e.g., sample entropy of residuals)
+  - Compute errors in H-space (mean, p90, max over time and features):
+    - E_LF = ||H_LF* − Ĥ_LF||, E_BP = ||H_BP* − Ĥ_BP||, E_HF = ||H_HF* − Ĥ_HF||
+    - E_INT = ||H_raw* − Ĥ_INT||
+  - Ratios and sensitivity:
+    - R_HF = E_HF / (E_LF + ε), R_BP = E_BP / (E_LF + ε)
+    - ΔE_BP = E_BP(x′) − E_BP(x), ΔE_HF = E_HF(x′) − E_HF(x) (jitter sensitivity)
   - Final score S (example):
-    - S = w_LF·E_LF + w_BP·E_BP + w_HF·E_HF + u·ΔE_BP + v·ΔE_HF  (weights tuned on dev)
-  - Protocols and metrics:
-    - Threshold τ set on dev via min-ACER or target FPR; report APCER/BPCER/ACER, EER, ROC-AUC/PR-AUC.
-- Deliverables:
-  - Evaluation scripts, reports per domain, ablations (with/without latent integration, with/without decorrelation, etc.).
-- Acceptance:
-  - Reproducible numbers with CI; clear τ selection; ablation justifications.
+    - S = w_LF·E_LF + w_BP·E_BP + w_HF·E_HF + u·E_INT + v·ΔE_BP + u’·ΔE_HF
+  - Thresholding and metrics:
+    - Pick τ via min-ACER or target FPR; report APCER, BPCER, ACER, EER, ROC-AUC/PR-AUC.
+  - Ablations:
+    - With/without L_decor, L_int_mix, jitter consistency; window size T variations; causal vs non-causal encoders.
+- Deliverables: Evaluation scripts/reports; τ selection rationale; confidence intervals.
+- Acceptance: Reproducible numbers; clear operating points; ablation insights.
 
 ### 6) Inference & Packaging Agent
 - Responsibilities:
-  - Export inference graph (TorchScript/ONNX) for time-domain only pipeline.
-  - Real-time option: causal TCN and causal FIR with compensated delay; streaming windowing (T≈48–64, hop 8–16).
-  - Provide APIs:
+  - Export model including E (student), E_τ (teacher target encoder), VAEs, and integrator.
+  - Real-time path: causal FIR + causal TCN; window T≈48–64, hop 8–16; online EMA for E_τ retained.
+  - APIs:
     - preprocess(x) → {x_LF, x_BP, x_HF}
-    - forward(x) → {x̂_LF, x̂_BP, x̂_HF, x̂_INT, S}
-- Deliverables:
-  - Inference module with CLI; latency/throughput benchmarks on target hardware (CPU-first).
-- Acceptance:
-  - Latency within budget; numerical parity to training within tolerance.
+    - encode_teacher({x, x_LF, x_BP, x_HF}) → {H_raw*, H_LF*, H_BP*, H_HF*}
+    - forward(x) → {Ĥ_LF, Ĥ_BP, Ĥ_HF, Ĥ_INT, S}
+  - Benchmarks: CPU-first latency, memory footprint, streaming behavior.
+- Deliverables: Packaged runtime (TorchScript/ONNX), CLI tools, latency report.
+- Acceptance: Meets latency budgets; numerical parity with training within tolerance.
 
 ### 7) MLOps Agent
-- Responsibilities:
-  - Repo structure; unit tests; experiment tracking; artifact versioning; env lockfiles.
-  - CI: lint/tests on commits; nightly training smoke tests.
-- Deliverables:
-  - CI workflows, dataset/model registry conventions, release playbooks.
-- Acceptance:
-  - Green CI; deterministic training/inference; traceable artifacts.
+- Responsibilities: Repo structure, unit/integration tests, experiment tracking, artifact registry, env lockfiles; CI (lint/tests, smoke-train).
+- Deliverables: CI workflows; dataset/model versioning; release playbooks; seed management.
+- Acceptance: Green CI; deterministic runs; traceable artifacts.
 
 ### 8) Documentation Agent
-- Responsibilities:
-  - Maintain this AGENTS plan, architecture overview, configuration cookbook, and quickstart.
-- Deliverables:
-  - Up-to-date READMEs; diagrams; example configs; troubleshooting guide.
-- Acceptance:
-  - New engineer can train and evaluate baseline in <1 day.
+- Responsibilities: Maintain this plan; architecture diagrams; config cookbook; quickstart; troubleshooting.
+- Deliverables: Up-to-date READMEs; examples and best practices.
+- Acceptance: New engineer can train/evaluate baseline in < 1 day.
 
-### 9) Optional Feature/Classifier Agent (if small spoof set available)
+### 9) Optional Feature/Classifier Agent (semi-supervised enhancement)
 - Responsibilities:
-  - Build clip-level feature vector φ strictly from time-domain signals and errors:
-    - [E_LF, E_BP, E_HF] stats (mean/p90/max), ratios, ΔE features, smoothness/sparsity penalties magnitudes, decorrelation terms.
-  - Train small classifier (logistic/MLP) and calibrate; fuse with one-class score if beneficial.
-- Deliverables:
-  - φ extractor, classifier training, calibration, and fusion recipe.
-- Acceptance:
-  - Improves ACER/EER on dev; avoids overfitting (dropout/L2, K-fold).
+  - Build clip-level feature φ purely from H-space errors and stats:
+    - {E_LF, E_BP, E_HF, E_INT} summaries; ratios R_HF, R_BP; ΔE features; L_decor magnitude proxies.
+  - Train small classifier (logistic/MLP) with few-shot spoof labels; calibrate; fuse with S.
+- Deliverables: φ extractor; classifier training; calibration; fusion recipe.
+- Acceptance: Improves ACER/EER without overfitting (dropout/L2, K-fold domain splits).
 
 --------------------------------------------------------------------------------
 
-## Cross-Agent Handoffs
+## 3) Cross-Agent Handoffs
 
 1) Data → FIR/Signal:
-- Landmark sequences, FPS, normalization stats.
+- x sequences, FPS, normalization stats.
 
 2) FIR/Signal → Model Architect:
-- FIR kernels, delay characteristics, derivative utilities.
+- FIR kernels, delay compensation notes, derivative ops.
 
 3) Model Architect → Loss & Training:
-- Modules ready; forward interfaces; parameter budget.
+- Encoders (E, E_τ), VAEs, integrator, mixing head; forward interfaces.
 
 4) Loss & Training → Metrics:
-- Checkpoints and logs; loss component magnitudes; dev curves.
+- Checkpoints; loss traces; dev curves; EMA logs.
 
 5) Metrics → PM + Inference:
-- Thresholds τ, operating points, ablation insights.
+- Thresholds τ; operating points; ablation decisions.
 
 6) Inference → MLOps + Documentation:
-- Exported models, benchmarks, quickstart API docs.
+- Exported artifacts; latency/memory benchmarks; API docs.
 
 7) (Optional) Loss & Metrics → Feature/Classifier:
-- Feature hooks and dev labels for semi-supervised classifier.
+- φ hooks; dev labels; calibration sets.
 
 --------------------------------------------------------------------------------
 
-## Milestones and Sprints
+## 4) Milestones and Sprints
 
-- M1 (Week 1): Data ready; FIR kernels validated (delay-aligned; unit tests).
-- M2 (Week 2): Shared encoder + 3 VAEs implemented; forward pass stable.
-- M3 (Weeks 3–4): Time-domain loss suite wired; training stable; no collapse.
-- M4 (Week 5): Scoring + thresholding; baseline ACER/EER; ablations.
-- M5 (Week 6): Inference packaging; latency OK; docs pass.
-- M6 (Weeks 7–8, optional): Classifier φ-features; fusion; domain robustness report.
+- M1 (Week 1): Data ready; FIR validated (delay-aligned; unit tests).
+- M2 (Week 2): Teacher-student encoders + 3 H-space VAEs + integrator; forward stable.
+- M3 (Weeks 3–4): H-space loss suite wired; KL warmup; stable training; no collapse.
+- M4 (Week 5): H-space scoring, τ selection; baseline ACER/EER; ablations.
+- M5 (Week 6): Inference packaging (teacher included); latency OK; docs pass.
+- M6 (Weeks 7–8, optional): φ-classifier; fusion; domain robustness report.
 
 --------------------------------------------------------------------------------
 
-## Acceptance Criteria (Baseline)
+## 5) Acceptance Criteria (Baseline)
 
 - Functional:
-  - Three VAEs reconstruct LF/BP/HF bands from FIR-split sequences in time domain.
-  - Latent integrator produces z_INT and x̂_INT; compositions are consistent.
+  - E_τ provides stable H targets; three VAEs reconstruct H_LF*, H_BP*, H_HF*.
+  - Latent integrator reconstructs H_raw* (Ĥ_INT), consistent with band reconstructions.
 
 - Quality:
-  - Meets target ACER/EER on dev; τ documented; ablations justify design.
-  - Robust to mild jitter/frame-drop; stable across reasonable FPS variations.
+  - Target ACER/EER met on dev; τ documented; ablations justify design choices.
+  - Robust under mild jitter/frame-drop; stable across realistic FPS variations.
 
 - Performance:
-  - Parameter count ≲ 2M; CPU inference within window latency budget (T≈48–64).
+  - Params ≲ 2M; CPU inference within window latency budget.
 
 - Reproducibility:
-  - Deterministic training/inference; CI green; artifacts versioned.
+  - Deterministic training/inference; CI green; versioned artifacts; fixed seeds.
 
 --------------------------------------------------------------------------------
 
-## Default Configs and Practical Tips
+## 6) Default Configs and Practical Tips
 
 - FIR:
-  - Taps N=127, Hamming; cutoffs: LF 2.5 Hz, BP 2.5–6 Hz, HF >6 Hz (tune by FPS).
-  - Offline: symmetric padding (near-zero phase). Streaming: causal FIR + delay compensation.
+  - Taps N=127, Hamming; LF: 0–2.5 Hz; BP: 2.5–6 Hz; HF: >6 Hz (tune by FPS).
+  - Offline: symmetric padding (near-zero phase). Online: causal with matched delay buffers.
 
-- Encoder (TCN):
-  - Dilations [1,2,4,8], kernel size 3, channels 64→128, residual connections.
-  - Causal=False for offline; True for streaming.
+- Encoders:
+  - TCN: dilations [1,2,4,8], kernel size 3, channels 64→128, residual connections.
+  - Teacher E_τ uses EMA decay ∈ [0.99, 0.999]; compute H* with stop-gradient.
 
 - Latents:
-  - d_LF=32 (clip-level), d_BP=32–48 (frame/window), d_HF=64 (frame).
+  - d_LF=32 (clip), d_BP=32–48 (frame/window), d_HF=64 (frame).
+  - z_INT from [z_LF, pooled z_BP, pooled z_HF] via small MLP or gated fusion.
 
-- Loss weights (starting point, tune on dev):
-  - L = 1.0·L_rec^LF + 0.8·L_rec^BP + 0.6·L_rec^HF
-      + 0.3·L_grad + 0.5·L_mix + 0.3·L_int
-      + β_LF·KL_LF + β_BP·KL_BP + β_HF·KL_HF
-      + 0.1·L_decor + 0.1·(LF smooth) + 0.05·(HF sparsity) + 0.1·L_jitter
+- Loss weights (starting point):
+  - As in Section 4; adjust on dev; keep HF regularization light to preserve detail.
 
 - Scoring:
-  - S = w_LF·E_LF + w_BP·E_BP + w_HF·E_HF + u·ΔE_BP + v·ΔE_HF
-  - Choose τ via min-ACER or target FPR on dev.
+  - Use E_b and E_INT summaries in H-space; include jitter sensitivity terms.
+  - Choose τ by min-ACER or target FPR; calibrate if needed.
 
 --------------------------------------------------------------------------------
 
-## Risks and Mitigations
+## 7) Risks and Mitigations
 
-- Band leakage or misalignment:
-  - Equalize group delays; verify with synthetic sweeps; enforce time-domain decorrelation; rely on L_mix and L_int to maintain decomposition.
+- Target drift / trivial solutions:
+  - Use teacher E_τ (EMA) for fixed targets H* (stop-gradient); do not backprop into E_τ.
+  - Optionally prewarm E with live-only autoencoding before VAE training.
 
 - Posterior collapse:
-  - KL warmup, free-bits if needed; stronger β on LF, weaker on HF.
+  - KL warmup/free-bits; β-balancing (stronger on LF, weaker on HF); residual connections in decoders.
 
-- Over-smoothing HF:
-  - Avoid strong smoothness on HF; use gentle amplitude regularization only.
+- Band leakage or misalignment:
+  - Verify FIR group delays; enforce L_decor among Ĥ_b; use G_MIX to reconcile band → global path.
+
+- Over-smoothing HF features:
+  - Avoid aggressive smoothness on HF; prefer mild amplitude regularization.
 
 - Domain drift:
-  - Recalibrate τ per environment; maintain dev-set checkpoints per domain.
+  - Maintain per-domain τ; monitor E_INT drift; recalibrate periodically.
 
 --------------------------------------------------------------------------------
 
-## Quickstart Responsibilities
+## 8) Quickstart Responsibilities
 
-- Data: Provide x, FPS, normalizers, and windowing.
-- FIR/Signal: Deliver x_LF, x_BP, x_HF utilities aligned in time; derivative ops.
-- Model: Implement shared encoder, 3 VAEs, latent integrator, consistency decoder.
-- Training: Wire losses (time-domain only), schedules, logging, checkpoints.
-- Metrics: Compute scores, pick τ, produce ACER/EER and ROC/PR.
-- Inference: Export models, verify latency; CLI tools for batch/streaming.
-- Docs: Quickstart and configs kept current; troubleshooting for common pitfalls.
+- Data: Provide x, FPS, normalization; windowing config.
+- FIR/Signal: Deliver x_LF, x_BP, x_HF utilities; delay compensation; derivative ops.
+- Model: Implement E, E_τ (EMA), LF/BP/HF VAEs, integrator, optional G_MIX.
+- Training: Wire H-space losses; KL warmup; checkpoints; logging.
+- Metrics: Compute H-space scores; select τ; report ACER/EER and ROC/PR.
+- Inference: Export full graph (incl. teacher); verify latency; provide CLI.
+- Docs: Keep quickstart/configs current; troubleshooting common pitfalls.
 
 --------------------------------------------------------------------------------
 
-## Definition of Done (DoD)
+## 9) Definition of Done (DoD)
 
-- End-to-end training on live-only data converges with stable, interpretable band reconstructions.
-- Latent integration improves or matches band-sum consistency; both paths reconstruct x.
-- Unit tests cover FIR alignment, encoder/decoder shapes, loss invariants.
+- End-to-end training converges with stable H-space reconstructions per band and strong Ĥ_INT vs H_raw* alignment.
+- Latent integration improves or matches band-wise-only performance on dev metrics.
+- Unit tests cover FIR alignment, encoder/decoder shapes, loss invariants, EMA behavior.
 - Inference meets latency/memory budgets; outputs match training within tolerance.
-- Documentation enables a newcomer to reproduce baseline metrics in <1 day.
+- Documentation enables a newcomer to reproduce baseline metrics in < 1 day.
