@@ -165,7 +165,8 @@ class LipLivenessBandDataset(Dataset):
         # Filter bank parameters
         fc_low=2.0,
         fc_high=8.0,
-        filter_order=4  # Butterworth filter order (논문의 FIR numtaps 대신)
+        filter_order=4,  # Butterworth filter order (논문의 FIR numtaps 대신)
+        random_crop=False  # If True, randomly crop T_fixed frames instead of center crop
     ):
         """
         Args:
@@ -189,6 +190,7 @@ class LipLivenessBandDataset(Dataset):
         self.use_acceleration = use_acceleration
         self.use_angle = use_angle
         self.use_angle_rate = use_angle_rate
+        self.random_crop = random_crop
 
         # Butterworth Filter Bank (논문의 FIR filter 대신)
         self.filter_bank = ButterworthFilterBank(
@@ -243,7 +245,13 @@ class LipLivenessBandDataset(Dataset):
         # 3. Crop/Pad to T_fixed (논문: T=150 frames)
         T = lips_norm.shape[0]
         if T > self.T_fixed:
-            start = (T - self.T_fixed) // 2
+            if self.random_crop:
+                # Random crop for training
+                max_start = T - self.T_fixed
+                start = np.random.randint(0, max_start + 1)
+            else:
+                # Center crop for validation/test
+                start = (T - self.T_fixed) // 2
             lips_norm = lips_norm[start:start + self.T_fixed]
         elif T < self.T_fixed:
             lips_norm = np.pad(

@@ -3,15 +3,17 @@ processed_live/
 processed_live_test/
 temp_fake_npz/
 temp_fake_npz_3d/
+20GBprocessed/
+test_balanced_npz/
 
 # Compressed files
 *.tar.gz
 *.zip
 
-# Model checkpoints (large files)
-*.pt
-*.pth
-runs/
+# Model checkpoints are now included
+# *.pt
+# *.pth
+# runs/
 
 # Python cache
 __pycache__/
