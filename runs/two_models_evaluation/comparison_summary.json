@@ -1,0 +1,50 @@
+{
+  "method": "Two-Stage Gaussian Filtering (PCA_10D)",
+  "configuration": {
+    "pca_dim": 10,
+    "confidence_stage1": 0.95,
+    "confidence_stage2": 0.7
+  },
+  "test_set_size": 234,
+  "test_set_real": 117,
+  "test_set_fake": 117,
+  "best_model": "method1_margin",
+  "models": {
+    "method1_margin": {
+      "accuracy": 0.8162393162393162,
+      "precision": 0.8363636363636363,
+      "recall": 0.7863247863247863,
+      "f1": 0.8105726872246696,
+      "specificity": 0.8461538461538461,
+      "explained_variance": 0.9430407285690308,
+      "confusion_matrix": [
+        [
+          99,
+          18
+        ],
+        [
+          25,
+          92
+        ]
+      ]
+    },
+    "method2_discriminator": {
+      "accuracy": 0.8034188034188035,
+      "precision": 0.8198198198198198,
+      "recall": 0.7777777777777778,
+      "f1": 0.7982456140350878,
+      "specificity": 0.8290598290598291,
+      "explained_variance": 0.9416683912277222,
+      "confusion_matrix": [
+        [
+          97,
+          20
+        ],
+        [
+          26,
+          91
+        ]
+      ]
+    }
+  }
+}
