@@ -23,6 +23,7 @@ class BaseConfig:
 
     논문 Section 2의 핵심 파라미터 기반
     """
+
     # Data paths
     data_dir = "/home/elicer/liveness_detection/model1/processed_live"
     save_dir = "runs/bandvae"
@@ -75,6 +76,7 @@ class FullFeatureConfig(BaseConfig):
 
     총 8 features per landmark
     """
+
     feature_mode = "full"
 
     # Feature configuration
@@ -93,7 +95,7 @@ class FullFeatureConfig(BaseConfig):
 
     @staticmethod
     def get_feature_names():
-        return ['position', 'velocity', 'acceleration', 'angle', 'angle_rate']
+        return ["position", "velocity", "acceleration", "angle", "angle_rate"]
 
     def __repr__(self):
         return (
@@ -113,6 +115,7 @@ class SimpleFeatureConfig(BaseConfig):
 
     총 4 features per landmark
     """
+
     feature_mode = "simple"
 
     # Feature configuration
@@ -131,7 +134,7 @@ class SimpleFeatureConfig(BaseConfig):
 
     @staticmethod
     def get_feature_names():
-        return ['position', 'velocity']
+        return ["position", "velocity"]
 
     def __repr__(self):
         return (
@@ -163,9 +166,9 @@ def get_config(mode="simple"):
 
 
 if __name__ == "__main__":
-    print("="*60)
+    print("=" * 60)
     print("Band-Split VAE Configuration Comparison")
-    print("="*60)
+    print("=" * 60)
 
     print("\\n【FULL Feature Version】")
     cfg_full = get_config("full")
@@ -177,4 +180,4 @@ if __name__ == "__main__":
     print(cfg_simple)
     print(f"  Filter: {cfg_simple.fc_low}Hz ~ {cfg_simple.fc_high}Hz")
 
-    print("\\n" + "="*60)
+    print("\\n" + "=" * 60)
