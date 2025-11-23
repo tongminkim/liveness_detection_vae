@@ -4,12 +4,14 @@ Stage 2 Dataset: Real + Fake data from data_split.json
 - Returns (x_lf, x_bp, x_hf, label) where label=0 for Real, label=1 for Fake
 """
 
-import os
 import json
+import os
+from pathlib import Path
+
 import numpy as np
 import torch
-from torch.utils.data import Dataset
 from scipy.signal import butter, filtfilt
+from torch.utils.data import Dataset
 
 
 class Stage2Dataset(Dataset):
@@ -27,7 +29,8 @@ class Stage2Dataset(Dataset):
         fc_low=2.0,
         fc_high=8.0,
         filter_order=4,
-        random_crop=True
+        random_crop=True,
+        base_dir=None,
     ):
         """
         Args:
@@ -52,13 +55,16 @@ class Stage2Dataset(Dataset):
         self.fc_high = fc_high
         self.filter_order = filter_order
         self.random_crop = random_crop
+        self.base_dir = base_dir
 
         # Load split data
-        with open(split_json_path, 'r') as f:
+        with open(split_json_path, "r") as f:
             split_data = json.load(f)
 
         if split_name not in split_data:
-            raise ValueError(f"split_name must be 'stage2_train' or 'final_test', got {split_name}")
+            raise ValueError(
+                f"split_name must be 'stage2_train' or 'final_test', got {split_name}"
+            )
 
         # Collect files and labels
         self.files = []
@@ -67,17 +73,21 @@ class Stage2Dataset(Dataset):
         split = split_data[split_name]
 
         # Real files (label=0)
-        for file_path in split['real']:
-            self.files.append(file_path)
+        for file_path in split["real"]:
+            self.files.append(self._resolve_path(file_path))
             self.labels.append(0)
 
         # Fake files (label=1)
-        for file_path in split['fake']:
-            self.files.append(file_path)
+        for file_path in split["fake"]:
+            self.files.append(self._resolve_path(file_path))
             self.labels.append(1)
 
-        print(f"Butterworth Filter Bank: fc_low={fc_low}Hz, fc_high={fc_high}Hz, order={filter_order}")
-        print(f"Loaded {len(self.files)} samples ({split['real'].__len__()} real, {split['fake'].__len__()} fake)")
+        print(
+            f"Butterworth Filter Bank: fc_low={fc_low}Hz, fc_high={fc_high}Hz, order={filter_order}"
+        )
+        print(
+            f"Loaded {len(self.files)} samples ({split['real'].__len__()} real, {split['fake'].__len__()} fake)"
+        )
 
     def __len__(self):
         return len(self.files)
@@ -88,21 +98,24 @@ class Stage2Dataset(Dataset):
         data = np.load(self.files[idx])
 
         # Combine lips_outer and lips_inner to create 40 landmarks
-        lips_outer = data['lips_outer']  # (T, 21, 2)
-        lips_inner = data['lips_inner']  # (T, 21, 2)
+        lips_outer = data["lips_outer"]  # (T, 21, 2)
+        lips_inner = data["lips_inner"]  # (T, 21, 2)
 
         # Remove last duplicate points and concatenate
-        landmarks = np.concatenate([
-            lips_outer[:, :-1, :],  # (T, 20, 2)
-            lips_inner[:, :-1, :]   # (T, 20, 2)
-        ], axis=1)  # (T, 40, 2)
+        landmarks = np.concatenate(
+            [
+                lips_outer[:, :-1, :],  # (T, 20, 2)
+                lips_inner[:, :-1, :],  # (T, 20, 2)
+            ],
+            axis=1,
+        )  # (T, 40, 2)
 
         # Normalize by image size
-        size = data['size']
+        size = data["size"]
         h, w = size
         landmarks = landmarks.copy()
-        landmarks[..., 0] /= (w + 1e-8)
-        landmarks[..., 1] /= (h + 1e-8)
+        landmarks[..., 0] /= w + 1e-8
+        landmarks[..., 1] /= h + 1e-8
 
         label = self.labels[idx]
 
@@ -113,7 +126,9 @@ class Stage2Dataset(Dataset):
         features = self._crop_or_pad(features)  # (T_fixed, 40, C_feature)
 
         # Apply band-split filtering
-        x_lf, x_bp, x_hf = self._apply_filters(features)  # Each: (T_fixed, C_in_per_band)
+        x_lf, x_bp, x_hf = self._apply_filters(
+            features
+        )  # Each: (T_fixed, C_in_per_band)
 
         # Convert to tensors
         x_lf = torch.from_numpy(x_lf).float()
@@ -176,11 +191,11 @@ class Stage2Dataset(Dataset):
                 start = np.random.randint(0, T - self.T_fixed + 1)
             else:
                 start = 0  # Deterministic crop from beginning
-            return features[start:start + self.T_fixed]
+            return features[start : start + self.T_fixed]
         else:
             # Pad
             pad_width = ((0, self.T_fixed - T), (0, 0), (0, 0))
-            return np.pad(features, pad_width, mode='edge')
+            return np.pad(features, pad_width, mode="edge")
 
     def _apply_filters(self, features):
         """Apply Butterworth band-pass filters to create LF, BP, HF bands"""
@@ -188,13 +203,17 @@ class Stage2Dataset(Dataset):
         nyquist = self.fps / 2.0
 
         # LF: [0, fc_low] Hz
-        b_lf, a_lf = butter(self.filter_order, self.fc_low / nyquist, btype='low')
+        b_lf, a_lf = butter(self.filter_order, self.fc_low / nyquist, btype="low")
 
         # BP: [fc_low, fc_high] Hz
-        b_bp, a_bp = butter(self.filter_order, [self.fc_low / nyquist, self.fc_high / nyquist], btype='band')
+        b_bp, a_bp = butter(
+            self.filter_order,
+            [self.fc_low / nyquist, self.fc_high / nyquist],
+            btype="band",
+        )
 
         # HF: [fc_high, nyquist] Hz
-        b_hf, a_hf = butter(self.filter_order, self.fc_high / nyquist, btype='high')
+        b_hf, a_hf = butter(self.filter_order, self.fc_high / nyquist, btype="high")
 
         # Apply filters to each channel
         x_lf = np.zeros_like(features)
@@ -220,3 +239,26 @@ class Stage2Dataset(Dataset):
         x_hf = (x_hf - x_hf.mean()) / (x_hf.std() + 1e-8)
 
         return x_lf, x_bp, x_hf
+
+    def _resolve_path(self, path_str):
+        """
+        Resolve dataset paths. Falls back to `base_dir` when absolute
+        paths inside the split file are not available locally.
+        """
+        path = Path(path_str)
+        if path.exists():
+            return str(path)
+
+        if self.base_dir is not None:
+            base = Path(self.base_dir)
+            try:
+                idx = path.parts.index("test_balanced_npz")
+                candidate = base / Path(*path.parts[idx + 1 :])
+                candidate = base / Path(*path.parts[idx + 1 :])
+            except ValueError:
+                candidate = base / path.name
+
+            if candidate.exists():
+                return str(candidate.resolve())
+
+        raise FileNotFoundError(f"Sample not found: {path_str}")

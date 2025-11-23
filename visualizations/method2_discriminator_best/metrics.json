@@ -1,0 +1,7 @@
+{
+  "checkpoint": "method2_discriminator_best.pt",
+  "accuracy": 0.7264957264957265,
+  "precision": 0.7523809523809524,
+  "recall": 0.6752136752136753,
+  "f1": 0.7117117117117117
+}

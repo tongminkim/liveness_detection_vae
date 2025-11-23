@@ -27,7 +27,7 @@ from sklearn.metrics import (
 )
 from torch.utils.data import DataLoader
 
-from config_bandvae import FullFeatureConfig
+from config_bandvae import Config
 from dataset_stage2 import Stage2Dataset
 from model_bandvae import BandSplitVAE, band_split_vae_loss
 
@@ -417,7 +417,7 @@ def main():
     print()
 
     # Load configuration
-    config = FullFeatureConfig()
+    config = Config(mode="full")
     config.T_fixed = 300
 
     # ========================================
