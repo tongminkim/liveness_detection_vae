@@ -1,0 +1,56 @@
+% TikZ diagram for BandSplitVAE
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds}
+\definecolor{colInput}{RGB}{237,242,250}
+\definecolor{colFilter}{RGB}{255,234,207}
+\definecolor{colLF}{RGB}{228,241,255}
+\definecolor{colBP}{RGB}{255,233,219}
+\definecolor{colHF}{RGB}{255,224,240}
+\definecolor{colFusionW}{RGB}{255,239,176}
+\definecolor{colFusion}{RGB}{255,246,204}
+\definecolor{colLossBand}{RGB}{255,229,225}
+\definecolor{colLossTotal}{RGB}{255,215,209}
+\begin{tikzpicture}[>=Latex, font=\small,
+  node distance=1.9cm and 2.2cm,
+  box/.style={draw, rounded corners, minimum width=3cm, minimum height=1.3cm, align=center}]
+  % Nodes
+  \node[box, fill=colInput] (input) {Input\\Lip Landmarks};
+  \node[box, fill=colFilter, right=2.4cm of input] (filter) {Butterworth Filter Bank\\(orders split LF/BP/HF)};
+
+  \node[box, fill=colLF, above right=1.4cm and 2.3cm of filter] (vae_lf) {LF VAE\\1×1 Conv → TCN → (μ, logσ\textsuperscript{2})\\Reparam → TCN → $\hat{x}_{LF}$};
+  \node[box, fill=colBP, right=2.3cm of filter] (vae_bp) {BP VAE\\same pipeline → $\hat{x}_{BP}$};
+  \node[box, fill=colHF, below right=1.4cm and 2.3cm of filter] (vae_hf) {HF VAE\\same pipeline → $\hat{x}_{HF}$};
+
+  \node[box, fill=colFusionW, right=2.6cm of vae_lf] (fusion_w) {Fusion Weights\\$w = \mathrm{softmax}([w_L, w_B, w_H])$};
+  \node[box, fill=colFusion, below=1.8cm of fusion_w] (weighted) {Weighted Sum\\$\hat{x}_{\text{fused}} = \sum_b w_b \cdot \hat{x}_b$};
+
+  \node[box, fill=colLossBand, right=2.4cm of vae_lf] (loss_lf) {LF Rec Loss + $\beta_{LF}\cdot KL$};
+  \node[box, fill=colLossBand, right=2.4cm of vae_bp] (loss_bp) {BP Rec Loss + $\beta_{BP}\cdot KL$};
+  \node[box, fill=colLossBand, right=2.4cm of vae_hf] (loss_hf) {HF Rec Loss + $\beta_{HF}\cdot KL$};
+
+  \node[box, fill=colLossTotal, right=3.7cm of weighted, minimum height=2.2cm] (loss_total) {Total Loss\\$\sum_b \text{Loss}_b + \alpha\lVert x_{\text{full}} - \hat{x}_{\text{fused}}\rVert_1$};
+
+  % Connections
+  \draw[->] (input) -- (filter);
+  \draw[->] (filter) -- node[above left] {LF split} (vae_lf);
+  \draw[->] (filter) -- node[above] {BP split} (vae_bp);
+  \draw[->] (filter) -- node[below left] {HF split} (vae_hf);
+
+  \draw[->] (vae_lf) -- (fusion_w);
+  \draw[->] (fusion_w) -- (weighted);
+  \draw[->] (vae_bp.east) -- ++(0.6,0) |- (weighted);
+  \draw[->] (vae_hf.east) -- ++(0.6,0) |- (weighted);
+
+  \draw[->] (vae_lf) -- (loss_lf);
+  \draw[->] (vae_bp) -- (loss_bp);
+  \draw[->] (vae_hf) -- (loss_hf);
+  \draw[->] (loss_lf) -- (loss_total);
+  \draw[->] (loss_bp) -- (loss_total);
+  \draw[->] (loss_hf) -- (loss_total);
+  \draw[->] (weighted) -- node[above] {$\alpha\lVert x_{\text{full}} - \hat{x}_{\text{fused}}\rVert_1$} (loss_total);
+
+  % Bounding box
+  \begin{pgfonlayer}{background}
+    \node[draw, rounded corners, thick, inner sep=0.7cm, fit={(input) (loss_total)}] (frame) {};
+  \end{pgfonlayer}
+  \node[font=\bfseries] at (frame.north) [yshift=0.45cm] {BandSplitVAE};
+\end{tikzpicture}
