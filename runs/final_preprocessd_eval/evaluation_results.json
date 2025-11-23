@@ -1,0 +1,25 @@
+{
+  "model_checkpoint": "runs/stage2_method1_margin_fixed/stage2_method1_best.pt",
+  "method": "PCA_10D",
+  "pca_dim": 10,
+  "explained_variance": 0.996803343296051,
+  "confidence_stage1": 0.95,
+  "confidence_stage2": 0.7,
+  "accuracy": 0.532,
+  "precision": 0.5540540540540541,
+  "recall": 0.328,
+  "f1": 0.4120603015075377,
+  "specificity": 0.736,
+  "stage1_pass_rate": 0.932,
+  "stage2_pass_rate": 0.704,
+  "confusion_matrix": [
+    [
+      92,
+      33
+    ],
+    [
+      84,
+      41
+    ]
+  ]
+}
