@@ -6,11 +6,13 @@
 * Don't try to list all elements of dataset, or all lines from dataset. Read only a few lines of it.
 * Don't give names too lengthy. Use meaningful names that describe the purpose of the variable or function.
 * Try to run script always after you made. Debug if crashes.
+* Use GPu `mps` not `cuda`.
 
 # Repository explanation
 * The directory `runs` includes `.pt` which are pretrained checkpoint for models.
 * All visualization made should be placed under `visualizations`.
 * The directory `scripts` gathers python scripts which are runnable on its own.
+* training dataset is under `20GBprocessed`
 
 ## final.py
 It contains runnable final evaluation script of model.
