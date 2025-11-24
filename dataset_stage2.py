@@ -19,8 +19,8 @@ class Stage2Dataset(Dataset):
 
     def __init__(
         self,
-        split_json_path,
-        split_name,  # 'stage2_train' or 'final_test'
+        split_json_path=None,
+        split_name=None,  # 'stage2_train' or 'final_test'
         T_fixed=300,
         fps=30,
         use_acceleration=True,
@@ -31,6 +31,7 @@ class Stage2Dataset(Dataset):
         filter_order=4,
         random_crop=True,
         base_dir=None,
+        files_and_labels=None,
     ):
         """
         Args:
@@ -57,36 +58,48 @@ class Stage2Dataset(Dataset):
         self.random_crop = random_crop
         self.base_dir = base_dir
 
-        # Load split data
-        with open(split_json_path, "r") as f:
-            split_data = json.load(f)
-
-        if split_name not in split_data:
-            raise ValueError(
-                f"split_name must be 'stage2_train' or 'final_test', got {split_name}"
-            )
-
-        # Collect files and labels
         self.files = []
         self.labels = []
 
-        split = split_data[split_name]
+        if files_and_labels is not None:
+            if split_name is None:
+                split_name = "custom"
+            for file_path, label in files_and_labels:
+                self.files.append(self._resolve_path(file_path))
+                self.labels.append(int(label))
+            real_count = sum(1 for lbl in self.labels if lbl == 0)
+            fake_count = len(self.labels) - real_count
+        else:
+            if split_json_path is None:
+                raise ValueError(
+                    "split_json_path is required when files_and_labels is not provided"
+                )
+            with open(split_json_path, "r") as f:
+                split_data = json.load(f)
 
-        # Real files (label=0)
-        for file_path in split["real"]:
-            self.files.append(self._resolve_path(file_path))
-            self.labels.append(0)
+            if split_name not in split_data:
+                raise ValueError(
+                    f"split_name must be 'stage2_train' or 'final_test', got {split_name}"
+                )
 
-        # Fake files (label=1)
-        for file_path in split["fake"]:
-            self.files.append(self._resolve_path(file_path))
-            self.labels.append(1)
+            split = split_data[split_name]
+
+            for file_path in split["real"]:
+                self.files.append(self._resolve_path(file_path))
+                self.labels.append(0)
+
+            for file_path in split["fake"]:
+                self.files.append(self._resolve_path(file_path))
+                self.labels.append(1)
+
+            real_count = len(split["real"])
+            fake_count = len(split["fake"])
 
         print(
             f"Butterworth Filter Bank: fc_low={fc_low}Hz, fc_high={fc_high}Hz, order={filter_order}"
         )
         print(
-            f"Loaded {len(self.files)} samples ({split['real'].__len__()} real, {split['fake'].__len__()} fake)"
+            f"Loaded {len(self.files)} samples ({real_count} real, {fake_count} fake)"
         )
 
     def __len__(self):

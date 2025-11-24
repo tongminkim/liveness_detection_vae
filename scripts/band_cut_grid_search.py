@@ -120,7 +120,7 @@ class BandCutGridSearch:
         fc_low_values=None,
         fc_high_values=None,
         filter_order=4,
-        batch_size=64,
+        batch_size=256,
         num_workers=0,
         max_pairs=None,
         epochs=10,
