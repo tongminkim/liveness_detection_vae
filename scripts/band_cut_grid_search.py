@@ -16,12 +16,12 @@ import torch
 from scipy import stats
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
     precision_recall_fscore_support,
 )
+from sklearn.preprocessing import StandardScaler  # Added for PCA scaling
 from torch.utils.data import DataLoader
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -166,9 +166,7 @@ class BandCutGridSearch:
             self.device = torch.device(device)
 
         self.fc_low_values = (
-            fc_low_values
-            if fc_low_values is not None
-            else [1.0, 2.0, 3.0, 4.0]
+            fc_low_values if fc_low_values is not None else [1.0, 2.0, 3.0, 4.0]
         )
         self.fc_high_values = (
             fc_high_values
@@ -189,9 +187,14 @@ class BandCutGridSearch:
         ).to(self.device)
 
         if self.use_pretrained and self.pretrained_path.exists():
-            from torch.serialization import add_safe_globals
+            # ``add_safe_globals`` is required only for older PyTorch versions.
+            # Guard the import so that newer versions without this function still work.
+            try:
+                from torch.serialization import add_safe_globals  # type: ignore
 
-            add_safe_globals([Config])
+                add_safe_globals([Config])
+            except Exception:
+                pass
             checkpoint = torch.load(
                 self.pretrained_path, map_location=self.device, weights_only=False
             )
@@ -240,7 +243,7 @@ class BandCutGridSearch:
                     break
             if total_batches > 0:
                 avg_loss = total_loss / total_batches
-                print(f"  Epoch {epoch+1}/{self.epochs} - loss: {avg_loss:.4f}")
+                print(f"  Epoch {epoch + 1}/{self.epochs} - loss: {avg_loss:.4f}")
         model.eval()
         return model
 
@@ -267,7 +270,9 @@ class BandCutGridSearch:
             pin_memory=self.device.type == "cuda",
         )
 
-    def _two_stage_filter(self, losses_3d, latents_pca, labels, loss_mu, loss_cov, latent_mu, latent_cov):
+    def _two_stage_filter(
+        self, losses_3d, latents_pca, labels, loss_mu, loss_cov, latent_mu, latent_cov
+    ):
         preds = []
         stage1_pass = 0
         stage2_pass = 0
@@ -384,8 +389,10 @@ class BandCutGridSearch:
             ax.set_ylabel("PC2")
         handles, labels_ = axes[0].get_legend_handles_labels()
         fig.legend(handles, labels_, loc="upper center", ncol=2)
-        fig.suptitle(f"PCA projections fc_low={fc_low}Hz fc_high={fc_high}Hz", fontsize=14)
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.suptitle(
+            f"PCA projections fc_low={fc_low}Hz fc_high={fc_high}Hz", fontsize=14
+        )
+        plt.tight_layout(rect=(0, 0, 1, 0.96))
         out_path = out_dir / f"pca_grid_fc{fc_low:.1f}_{fc_high:.1f}.png"
         fig.savefig(out_path, dpi=150)
         plt.close(fig)
@@ -435,29 +442,21 @@ class BandCutGridSearch:
             1e2,
         )
         train_per_band = {
-            k: np.clip(
-                np.nan_to_num(v, copy=False, posinf=1e2, neginf=-1e2), -1e2, 1e2
-            )
+            k: np.clip(np.nan_to_num(v, copy=False, posinf=1e2, neginf=-1e2), -1e2, 1e2)
             for k, v in train_per_band.items()
         }
         test_per_band = {
-            k: np.clip(
-                np.nan_to_num(v, copy=False, posinf=1e2, neginf=-1e2), -1e2, 1e2
-            )
+            k: np.clip(np.nan_to_num(v, copy=False, posinf=1e2, neginf=-1e2), -1e2, 1e2)
             for k, v in test_per_band.items()
         }
 
         real_mask = train_labels == 0
         loss_mu, loss_cov = fit_gaussian(train_losses[real_mask])
 
-        # Standardize before PCA to mitigate scale explosions
-        scaler = StandardScaler()
-        train_latents_scaled = scaler.fit_transform(train_latents[real_mask])
-        test_latents_scaled = scaler.transform(test_latents)
-
+        # Apply PCA (NO StandardScaler - preserves scale information)
         pca = PCA(n_components=self.pca_dim)
-        train_latents_pca = pca.fit_transform(train_latents_scaled)
-        test_latents_pca = pca.transform(test_latents_scaled)
+        train_latents_pca = pca.fit_transform(train_latents[real_mask])
+        test_latents_pca = pca.transform(test_latents)
         latent_mu, latent_cov = fit_gaussian(train_latents_pca)
 
         results = self._two_stage_filter(
@@ -475,6 +474,21 @@ class BandCutGridSearch:
 
         pair_dir = self.output_dir / f"fc_{fc_low:.1f}_{fc_high:.1f}"
         pair_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save trained model checkpoint
+        model_save_path = pair_dir / "model_best.pt"
+        torch.save(
+            {
+                "fc_low": fc_low,
+                "fc_high": fc_high,
+                "model_state_dict": model.state_dict(),
+                "config": self.config,
+                "accuracy": results["accuracy"],
+                "f1": results["f1"],
+            },
+            model_save_path,
+        )
+        print(f"  Saved model to {model_save_path}")
 
         tsne_paths = self._save_tsne(
             {
@@ -558,9 +572,13 @@ class BandCutGridSearch:
         sanitized = []
         for row in results:
             row_copy = dict(row)
-            row_copy["predictions"] = [int(x) for x in np.asarray(row.get("predictions", [])).ravel().tolist()]
+            row_copy["predictions"] = [
+                int(x) for x in np.asarray(row.get("predictions", [])).ravel().tolist()
+            ]
             if isinstance(row_copy.get("confusion_matrix"), np.ndarray):
-                row_copy["confusion_matrix"] = row_copy["confusion_matrix"].astype(int).tolist()
+                row_copy["confusion_matrix"] = (
+                    row_copy["confusion_matrix"].astype(int).tolist()
+                )
             sanitized.append(row_copy)
 
         with open(csv_path, "w", newline="") as f:
