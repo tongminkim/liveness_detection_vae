@@ -18,7 +18,7 @@
 It contains runnable final evaluation script of model.
 
 # Programming style
-It should strictly follow OOP, hence class always expose the essential methods hiding else.
+It should strictly follow OOP, hence class always expose the essential methods only, hiding else.
 Don't separate classes too often, only do it when it's necessary.
 Non-trivial inheritance or polymorphism is discouraged.
 
