@@ -129,6 +129,7 @@ class BandCutGridSearch:
         pretrained_path="runs/stage1_pretrained.pt",
         use_pretrained=False,
         max_train_batches=None,
+        device=None,
     ):
         self.split_json = (
             Path(split_json) if os.path.isabs(split_json) else ROOT / split_json
@@ -159,7 +160,10 @@ class BandCutGridSearch:
         )
         self.use_pretrained = use_pretrained
         self.max_train_batches = max_train_batches
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
 
         self.fc_low_values = (
             fc_low_values
@@ -210,9 +214,9 @@ class BandCutGridSearch:
                     if not mask.any():
                         continue
                     x_lf, x_bp, x_hf = x_lf[mask], x_bp[mask], x_hf[mask]
-                x_lf = x_lf.to(self.device)
-                x_bp = x_bp.to(self.device)
-                x_hf = x_hf.to(self.device)
+                x_lf = x_lf.to(self.device, non_blocking=True)
+                x_bp = x_bp.to(self.device, non_blocking=True)
+                x_hf = x_hf.to(self.device, non_blocking=True)
 
                 optimizer.zero_grad()
                 recons, mus, logvars, x_hat_fused = model(x_lf, x_bp, x_hf)
@@ -260,7 +264,7 @@ class BandCutGridSearch:
             batch_size=self.batch_size,
             shuffle=shuffle,
             num_workers=self.num_workers,
-            pin_memory=torch.cuda.is_available(),
+            pin_memory=self.device.type == "cuda",
         )
 
     def _two_stage_filter(self, losses_3d, latents_pca, labels, loss_mu, loss_cov, latent_mu, latent_cov):
@@ -465,6 +469,9 @@ class BandCutGridSearch:
             latent_mu,
             latent_cov,
         )
+        # Ensure numpy arrays for downstream serialization
+        results["confusion_matrix"] = np.asarray(results["confusion_matrix"])
+        results["predictions"] = np.asarray(results["predictions"])
 
         pair_dir = self.output_dir / f"fc_{fc_low:.1f}_{fc_high:.1f}"
         pair_dir.mkdir(parents=True, exist_ok=True)
@@ -513,8 +520,10 @@ class BandCutGridSearch:
         )
         # Prepare metrics for JSON (convert arrays to lists)
         metrics_save = dict(results)
-        metrics_save["predictions"] = results["predictions"].tolist()
-        metrics_save["confusion_matrix"] = results["confusion_matrix"].tolist()
+        preds_arr = np.asarray(results["predictions"]).ravel()
+        metrics_save["predictions"] = [int(x) for x in preds_arr.tolist()]
+        cm_arr = np.asarray(results["confusion_matrix"])
+        metrics_save["confusion_matrix"] = cm_arr.astype(int).tolist()
 
         with open(pair_dir / "metrics.json", "w") as f:
             json.dump(metrics_save, f, indent=2)
@@ -546,14 +555,22 @@ class BandCutGridSearch:
             "tp",
         ]
 
+        sanitized = []
+        for row in results:
+            row_copy = dict(row)
+            row_copy["predictions"] = [int(x) for x in np.asarray(row.get("predictions", [])).ravel().tolist()]
+            if isinstance(row_copy.get("confusion_matrix"), np.ndarray):
+                row_copy["confusion_matrix"] = row_copy["confusion_matrix"].astype(int).tolist()
+            sanitized.append(row_copy)
+
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            for row in results:
+            for row in sanitized:
                 writer.writerow({k: row.get(k) for k in fieldnames})
 
         with open(json_path, "w") as f:
-            json.dump(results, f, indent=2)
+            json.dump(sanitized, f, indent=2)
 
         return csv_path, json_path
 
@@ -684,6 +701,12 @@ def main():
         default=None,
         help="Optional cap on batches per epoch (useful for quick sanity checks).",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Force device (e.g., cuda, cuda:0, mps, cpu). Defaults to cuda if available.",
+    )
     args = parser.parse_args()
 
     def _parse_float_list(val):
@@ -704,6 +727,7 @@ def main():
         pretrained_path=args.pretrained_path,
         use_pretrained=args.use_pretrained,
         max_train_batches=args.max_train_batches,
+        device=args.device,
     )
     search.run()
 
