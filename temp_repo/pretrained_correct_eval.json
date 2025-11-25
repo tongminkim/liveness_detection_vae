@@ -1,0 +1,31 @@
+{
+  "model": "runs/stage1_pretrained.pt",
+  "method": "Two-Stage Gaussian (NO StandardScaler)",
+  "fc_low": 2.0,
+  "fc_high": 8.0,
+  "pca_dim": 10,
+  "confidence_stage1": 0.95,
+  "confidence_stage2": 0.7,
+  "accuracy": 0.8760683760683761,
+  "precision": 0.8384615384615385,
+  "recall": 0.9316239316239316,
+  "f1": 0.8825910931174089,
+  "specificity": 0.8205128205128205,
+  "stage1_pass_rate": 0.9487179487179487,
+  "stage2_pass_rate": 0.4444444444444444,
+  "confusion_matrix": [
+    [
+      96,
+      21
+    ],
+    [
+      8,
+      109
+    ]
+  ],
+  "tn": 96,
+  "fp": 21,
+  "fn": 8,
+  "tp": 109,
+  "explained_variance": 0.9662033319473267
+}

@@ -1,0 +1,29 @@
+# Video files (exclude)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+
+# Large numpy arrays (exclude)
+*.npy
+*.npz
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git repositories inside
+temp_repo/.git/
+
+# Keep these files:
+# - .pt files (model checkpoints)
+# - .jpg, .png (images)
+# - .csv (data files)

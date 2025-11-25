@@ -1,0 +1,30 @@
+{
+  "model_name": "method1_margin_fixed",
+  "model_checkpoint": "/home/elicer/liveness_detection/model1/runs/stage2_method1_margin_fixed/stage2_method1_best.pt",
+  "method": "Two-Stage Gaussian Filtering (PCA_10D)",
+  "pca_dim": 10,
+  "explained_variance": 0.9122655391693115,
+  "confidence_stage1": 0.95,
+  "confidence_stage2": 0.7,
+  "accuracy": 0.8846153846153846,
+  "precision": 0.8571428571428571,
+  "recall": 0.9230769230769231,
+  "f1": 0.8888888888888888,
+  "specificity": 0.8461538461538461,
+  "stage1_pass_rate": 0.9700854700854701,
+  "stage2_pass_rate": 0.46153846153846156,
+  "confusion_matrix": [
+    [
+      99,
+      18
+    ],
+    [
+      9,
+      108
+    ]
+  ],
+  "tn": 99,
+  "fp": 18,
+  "fn": 9,
+  "tp": 108
+}

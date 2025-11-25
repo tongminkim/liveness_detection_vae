@@ -1,0 +1,61 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Method}{2}{section.2}\protected@file@percent }
+\newlabel{sec:method}{{2}{2}{Method}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Overview}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Input Representation}{2}{subsection.2.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Band-Split VAE Architecture. Input landmarks are decomposed into three frequency bands (LF, BP, HF), each processed by an independent VAE with shared hyperparameters but separate weights.\relax }}{2}{figure.caption.2}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:architecture}{{1}{2}{Band-Split VAE Architecture. Input landmarks are decomposed into three frequency bands (LF, BP, HF), each processed by an independent VAE with shared hyperparameters but separate weights.\relax }{figure.caption.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Band-Split VAE Architecture}{2}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Stage 1: One-Class Pretraining}{3}{subsection.2.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.5}Stage 2: Discriminative Fine-tuning}{3}{subsection.2.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {2.5.1}Method 1: Margin-Based Loss}{3}{subsubsection.2.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {2.5.2}Method 2: Latent Discriminator}{3}{subsubsection.2.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.6}Inference: Two-Stage Gaussian Filtering}{3}{subsection.2.6}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Performance comparison on test set (234 samples). All methods use two-stage Gaussian filtering for inference.\relax }}{4}{table.caption.3}\protected@file@percent }
+\newlabel{tab:main_results}{{1}{4}{Performance comparison on test set (234 samples). All methods use two-stage Gaussian filtering for inference.\relax }{table.caption.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Experiments}{4}{section.3}\protected@file@percent }
+\newlabel{sec:experiments}{{3}{4}{Experiments}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Dataset and Setup}{4}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Main Results}{4}{subsection.3.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Performance comparison across all metrics. Method 2 (Discriminator) achieves the best F1-score of 89.26\%, slightly outperforming Method 1 (88.89\%) and significantly exceeding Stage 1 baseline (86.64\%).\relax }}{4}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:main_results}{{2}{4}{Performance comparison across all metrics. Method 2 (Discriminator) achieves the best F1-score of 89.26\%, slightly outperforming Method 1 (88.89\%) and significantly exceeding Stage 1 baseline (86.64\%).\relax }{figure.caption.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Confusion matrices for all methods. Method 2 achieves TN=100, FP=17, FN=9, TP=108. Both Stage 2 methods significantly reduce false negatives compared to Stage 1 (FN=10 vs FN=10).\relax }}{4}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:confusion_matrices}{{3}{4}{Confusion matrices for all methods. Method 2 achieves TN=100, FP=17, FN=9, TP=108. Both Stage 2 methods significantly reduce false negatives compared to Stage 1 (FN=10 vs FN=10).\relax }{figure.caption.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Radar chart comparing all performance metrics. Method 2 (Discriminator) shows the most balanced performance across all dimensions, with particularly strong recall and F1-score.\relax }}{5}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:radar}{{4}{5}{Radar chart comparing all performance metrics. Method 2 (Discriminator) shows the most balanced performance across all dimensions, with particularly strong recall and F1-score.\relax }{figure.caption.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Training curves for (left) Stage 1 one-class VAE pretraining and (right) Stage 2 discriminative fine-tuning. Stage 1 converges to low reconstruction loss on real samples. Stage 2 rapidly improves F1-score, reaching 89.26\% by epoch 10.\relax }}{5}{figure.caption.7}\protected@file@percent }
+\newlabel{fig:training}{{5}{5}{Training curves for (left) Stage 1 one-class VAE pretraining and (right) Stage 2 discriminative fine-tuning. Stage 1 converges to low reconstruction loss on real samples. Stage 2 rapidly improves F1-score, reaching 89.26\% by epoch 10.\relax }{figure.caption.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Comprehensive Performance Analysis}{5}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Training Dynamics}{5}{subsection.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Frequency Band Analysis}{5}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Computational Efficiency}{5}{subsection.3.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Discussion}{6}{section.4}\protected@file@percent }
+\newlabel{sec:discussion}{{4}{6}{Discussion}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Key Contributions}{6}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Comparison with Prior Work}{6}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Limitations and Future Work}{6}{subsection.4.3}\protected@file@percent }
+\bibstyle{plain}
+\bibdata{references}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Broader Impact}{7}{subsection.4.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{7}{section.5}\protected@file@percent }
+\gdef \@abspage@last{7}

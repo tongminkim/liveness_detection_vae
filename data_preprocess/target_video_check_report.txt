@@ -1,0 +1,52 @@
+
+======================================================================
+           타겟영상 존재 여부 분석 리포트
+======================================================================
+
+1. 전체 통계
+   - 총 변조영상 수: 139,951개
+   - 타겟영상 존재: 10,266개 (7.34%)
+   - 타겟영상 누락: 129,685개 (92.66%)
+
+2. 변조모델별 통계
+
+   [fo]
+   - 총 개수: 49,586개
+   - 존재: 3,546개 (7.15%)
+   - 누락: 46,040개 (92.85%)
+
+   [audio-driven]
+   - 총 개수: 14,927개
+   - 존재: 1,242개 (8.32%)
+   - 누락: 13,685개 (91.68%)
+
+   [dfl]
+   - 총 개수: 27,680개
+   - 존재: 2,299개 (8.31%)
+   - 누락: 25,381개 (91.69%)
+
+   [dffs]
+   - 총 개수: 28,962개
+   - 존재: 1,757개 (6.07%)
+   - 누락: 27,205개 (93.93%)
+
+   [fsgan]
+   - 총 개수: 18,796개
+   - 존재: 1,422개 (7.57%)
+   - 누락: 17,374개 (92.43%)
+
+3. 타겟영상이 발견된 폴더별 분포
+   - 원본1: 10,266개 (100.00%)
+
+4. 누락 분석
+   - 누락된 고유 타겟UUID 수: 275개
+   - 누락된 타겟영상 목록: /home/elicer/liveness_detection/missing_target_videos.csv
+   - 누락된 UUID 목록: /home/elicer/liveness_detection/missing_target_uuids.txt
+
+5. 생성된 파일
+   - 전체 분석 결과: /home/elicer/liveness_detection/deepfake_metadata_with_target_check.csv
+   - 시각화 이미지: /home/elicer/liveness_detection/target_video_existence_analysis.png
+   - 누락 영상 CSV: /home/elicer/liveness_detection/missing_target_videos.csv
+   - 누락 UUID 목록: /home/elicer/liveness_detection/missing_target_uuids.txt
+
+======================================================================

@@ -1,0 +1,30 @@
+{
+  "model_name": "method2_discriminator",
+  "model_checkpoint": "/home/elicer/liveness_detection/model1/runs/method2_discriminator_best.pt",
+  "method": "Two-Stage Gaussian Filtering (PCA_10D)",
+  "pca_dim": 10,
+  "explained_variance": 0.9416683912277222,
+  "confidence_stage1": 0.95,
+  "confidence_stage2": 0.7,
+  "accuracy": 0.8034188034188035,
+  "precision": 0.8198198198198198,
+  "recall": 0.7777777777777778,
+  "f1": 0.7982456140350878,
+  "specificity": 0.8290598290598291,
+  "stage1_pass_rate": 0.9914529914529915,
+  "stage2_pass_rate": 0.5256410256410257,
+  "confusion_matrix": [
+    [
+      97,
+      20
+    ],
+    [
+      26,
+      91
+    ]
+  ],
+  "tn": 97,
+  "fp": 20,
+  "fn": 26,
+  "tp": 91
+}
