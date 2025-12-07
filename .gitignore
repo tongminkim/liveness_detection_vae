@@ -5,6 +5,7 @@ temp_fake_npz/
 temp_fake_npz_3d/
 20GBprocessed/
 test_balanced_npz/
+preprocessed/
 
 # Compressed files
 *.tar.gz
