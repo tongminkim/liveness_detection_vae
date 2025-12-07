@@ -1,7 +1,0 @@
-{
-  "checkpoint": "method1_margin_best.pt",
-  "accuracy": 0.7435897435897436,
-  "precision": 0.7766990291262136,
-  "recall": 0.6837606837606838,
-  "f1": 0.7272727272727273
-}
