@@ -1,47 +1,5 @@
-# Large data directories
-processed_live/
-processed_live_test/
-temp_fake_npz/
-temp_fake_npz_3d/
-20GBprocessed/
-test_balanced_npz/
-preprocessed/
-
-# Compressed files
-*.tar.gz
-*.zip
-
-# Model checkpoints are now included
-# *.pt
-# *.pth
-# runs/
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Logs
-*.log
-analysis_log.txt
-
-# OS
+datasets
+runs/*
 .DS_Store
-Thumbs.db
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Temporary files
-*.tmp
-temp/
-*.pid
-preprocessing_checkpoint.txt
+./lib/.DS_Store
+./scripts/DS_Store

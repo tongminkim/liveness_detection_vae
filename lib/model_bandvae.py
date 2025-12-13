@@ -25,16 +25,16 @@ Frequency-Decoupled Feature-Space VAE (Band-Split Version)
    → L1 reconstruction + KL divergence per band
 """
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from scipy import signal
-
 
 # ============================================
 # Butterworth Filter Bank (논문 Section 2.1)
 # ============================================
+
 
 class ButterworthFilterBank:
     """
@@ -72,9 +72,11 @@ class ButterworthFilterBank:
         wn_high = fc_high / nyquist
 
         # Design Butterworth filters (SOS format for numerical stability)
-        self.sos_lf = signal.butter(order, wn_low, btype='lowpass', output='sos')
-        self.sos_bp = signal.butter(order, [wn_low, wn_high], btype='bandpass', output='sos')
-        self.sos_hf = signal.butter(order, wn_high, btype='highpass', output='sos')
+        self.sos_lf = signal.butter(order, wn_low, btype="lowpass", output="sos")
+        self.sos_bp = signal.butter(
+            order, [wn_low, wn_high], btype="bandpass", output="sos"
+        )
+        self.sos_hf = signal.butter(order, wn_high, btype="highpass", output="sos")
 
     def apply(self, x):
         """
@@ -108,6 +110,7 @@ class ButterworthFilterBank:
 # TCN Building Blocks (재사용)
 # ============================================
 
+
 class TCNBlock(nn.Module):
     """Temporal Convolutional Network Block with residual connection"""
 
@@ -116,10 +119,7 @@ class TCNBlock(nn.Module):
         padding = dilation * (kernel_size - 1) // 2
 
         self.conv = nn.Conv1d(
-            C_in, C_out,
-            kernel_size=kernel_size,
-            padding=padding,
-            dilation=dilation
+            C_in, C_out, kernel_size=kernel_size, padding=padding, dilation=dilation
         )
         self.gn = nn.GroupNorm(1, C_out)
         self.act = nn.SiLU()
@@ -135,6 +135,7 @@ class TCNBlock(nn.Module):
 # ============================================
 # Single-Band VAE (논문 Section 2.1)
 # ============================================
+
 
 class SingleBandVAE(nn.Module):
     """
@@ -220,6 +221,7 @@ class SingleBandVAE(nn.Module):
 # Band-Split VAE (3-band) - 논문의 핵심 아키텍처
 # ============================================
 
+
 class BandSplitVAE(nn.Module):
     """
     Frequency-Decoupled Feature-Space VAE (논문 Figure 1)
@@ -266,10 +268,7 @@ class BandSplitVAE(nn.Module):
         self.vae_hf = SingleBandVAE(C_in_per_band, C_h, C_z, dilations)
 
         # Learnable fusion weights (initialized to 1/3)
-        self.register_parameter(
-            'fusion_weights',
-            nn.Parameter(torch.ones(3) / 3.0)
-        )
+        self.register_parameter("fusion_weights", nn.Parameter(torch.ones(3) / 3.0))
 
     def forward(self, x_lf, x_bp, x_hf):
         """
@@ -294,29 +293,15 @@ class BandSplitVAE(nn.Module):
 
         # Weighted fusion
         x_hat_fused = (
-            weights[0] * x_hat_lf +
-            weights[1] * x_hat_bp +
-            weights[2] * x_hat_hf
+            weights[0] * x_hat_lf + weights[1] * x_hat_bp + weights[2] * x_hat_hf
         )
 
         # Pack results
-        recons = {
-            'lf': x_hat_lf,
-            'bp': x_hat_bp,
-            'hf': x_hat_hf
-        }
+        recons = {"lf": x_hat_lf, "bp": x_hat_bp, "hf": x_hat_hf}
 
-        mus = {
-            'lf': mu_lf,
-            'bp': mu_bp,
-            'hf': mu_hf
-        }
+        mus = {"lf": mu_lf, "bp": mu_bp, "hf": mu_hf}
 
-        logvars = {
-            'lf': logvar_lf,
-            'bp': logvar_bp,
-            'hf': logvar_hf
-        }
+        logvars = {"lf": logvar_lf, "bp": logvar_bp, "hf": logvar_hf}
 
         return recons, mus, logvars, x_hat_fused
 
@@ -324,6 +309,7 @@ class BandSplitVAE(nn.Module):
 # ============================================
 # Loss Functions (논문 Section 2.3)
 # ============================================
+
 
 def kl_divergence(mu, logvar):
     """
@@ -338,11 +324,14 @@ def kl_divergence(mu, logvar):
 
 
 def band_split_vae_loss(
-    recons, mus, logvars,
+    recons,
+    mus,
+    logvars,
     targets,
-    x_hat_fused, x_target_full,
-    betas={'lf': 1.0, 'bp': 1.0, 'hf': 1.0},
-    alpha_fusion=0.1
+    x_hat_fused,
+    x_target_full,
+    betas={"lf": 1.0, "bp": 1.0, "hf": 1.0},
+    alpha_fusion=0.1,
 ):
     """
     Band-Split VAE Loss (논문 Section 2.3)
@@ -376,7 +365,7 @@ def band_split_vae_loss(
     total_loss = 0.0
 
     # Per-band losses
-    for band in ['lf', 'bp', 'hf']:
+    for band in ["lf", "bp", "hf"]:
         # Reconstruction loss (L1)
         recon_loss = F.l1_loss(recons[band], targets[band])
 
@@ -386,19 +375,19 @@ def band_split_vae_loss(
         # Band loss
         band_loss = recon_loss + betas[band] * kl_loss
 
-        loss_dict[f'recon_{band}'] = recon_loss.item()
-        loss_dict[f'kl_{band}'] = kl_loss.item()
-        loss_dict[f'total_{band}'] = band_loss.item()
+        loss_dict[f"recon_{band}"] = recon_loss.item()
+        loss_dict[f"kl_{band}"] = kl_loss.item()
+        loss_dict[f"total_{band}"] = band_loss.item()
 
         total_loss += band_loss
 
     # Fusion penalty (optional)
     if alpha_fusion > 0 and x_target_full is not None:
         fusion_loss = F.l1_loss(x_hat_fused, x_target_full)
-        loss_dict['fusion'] = fusion_loss.item()
+        loss_dict["fusion"] = fusion_loss.item()
         total_loss += alpha_fusion * fusion_loss
 
-    loss_dict['total'] = total_loss.item()
+    loss_dict["total"] = total_loss.item()
 
     return total_loss, loss_dict
 
@@ -407,10 +396,10 @@ def band_split_vae_loss(
 # Anomaly Scoring (논문 Section 2.4)
 # ============================================
 
+
 @torch.no_grad()
 def compute_band_split_anomaly_score(
-    model, x_lf, x_bp, x_hf,
-    betas={'lf': 1.0, 'bp': 1.0, 'hf': 1.0}
+    model, x_lf, x_bp, x_hf, betas={"lf": 1.0, "bp": 1.0, "hf": 1.0}
 ):
     """
     Compute anomaly score for band-split VAE
@@ -451,12 +440,14 @@ def compute_band_split_anomaly_score(
     score = 0.0
 
     # Per-band scoring
-    for band, x_in in zip(['lf', 'bp', 'hf'], [x_lf, x_bp, x_hf]):
+    for band, x_in in zip(["lf", "bp", "hf"], [x_lf, x_bp, x_hf]):
         # Reconstruction error
-        recon = F.l1_loss(recons[band], x_in, reduction='none').mean(dim=[1, 2])
+        recon = F.l1_loss(recons[band], x_in, reduction="none").mean(dim=[1, 2])
 
         # KL divergence
-        kl = (-0.5 * (1 + logvars[band] - mus[band].pow(2) - logvars[band].exp())).mean(dim=[1, 2])
+        kl = (-0.5 * (1 + logvars[band] - mus[band].pow(2) - logvars[band].exp())).mean(
+            dim=[1, 2]
+        )
 
         # Weighted sum
         score += recon + betas[band] * kl
@@ -495,9 +486,13 @@ if __name__ == "__main__":
     recons, mus, logvars, fused = model_simple(x_lf, x_bp, x_hf)
 
     print(f"Input shapes: LF={x_lf.shape}, BP={x_bp.shape}, HF={x_hf.shape}")
-    print(f"Recon shapes: LF={recons['lf'].shape}, BP={recons['bp'].shape}, HF={recons['hf'].shape}")
+    print(
+        f"Recon shapes: LF={recons['lf'].shape}, BP={recons['bp'].shape}, HF={recons['hf'].shape}"
+    )
     print(f"Fused shape: {fused.shape}")
-    print(f"Fusion weights: {F.softmax(model_simple.fusion_weights, dim=0).detach().numpy()}")
+    print(
+        f"Fusion weights: {F.softmax(model_simple.fusion_weights, dim=0).detach().numpy()}"
+    )
 
     # Count parameters
     n_params = sum(p.numel() for p in model_simple.parameters())
@@ -514,7 +509,9 @@ if __name__ == "__main__":
     recons, mus, logvars, fused = model_full(x_lf, x_bp, x_hf)
 
     print(f"Input shapes: LF={x_lf.shape}, BP={x_bp.shape}, HF={x_hf.shape}")
-    print(f"Recon shapes: LF={recons['lf'].shape}, BP={recons['bp'].shape}, HF={recons['hf'].shape}")
+    print(
+        f"Recon shapes: LF={recons['lf'].shape}, BP={recons['bp'].shape}, HF={recons['hf'].shape}"
+    )
     print(f"Fused shape: {fused.shape}")
 
     n_params = sum(p.numel() for p in model_full.parameters())

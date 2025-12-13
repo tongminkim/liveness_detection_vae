@@ -1,19 +1,29 @@
-"""
-Configuration for Band‑Split VAE (Section 2 implementation)
-
-The original version provided three separate classes (BaseConfig,
-FullFeatureConfig, SimpleFeatureConfig) and a factory function.  To
-follow the repository’s OOP style guidelines we replace that hierarchy
-with a single `Config` class that exposes the essential attributes via
-its public interface while keeping all implementation details hidden.
-
-Usage
------
-cfg = Config(mode="full")   # or mode="simple"
-print(cfg)                 # human‑readable summary
-"""
-
 from __future__ import annotations
+
+from pathlib import Path
+
+import torch
+
+# Default dataset location: project_root/datasets (handles the
+# common double-nested case 20GBprocessed/20GBprocessed).
+DATASET_NAME = "20GBprocessed"
+DATA_ROOT = Path(__file__).resolve().parent.parent / "datasets"
+
+
+def _resolve_data_dir(
+    dataset_name: str = DATASET_NAME, base_dir: Path = DATA_ROOT
+) -> str:
+    """
+    Pick the dataset directory, handling the common double-nested case
+    produced by some archive tools.
+    """
+    base = Path(base_dir) / dataset_name
+    nested = base / dataset_name
+    if nested.exists():
+        return str(nested)
+    if base.exists():
+        return str(base)
+    return str(nested)
 
 
 class Config:
@@ -35,8 +45,7 @@ class Config:
     # ------------------------------------------------------------------
     # Shared defaults (common to both modes)
     # ------------------------------------------------------------------
-    # Data paths
-    data_dir: str = "/home/elicer/liveness_detection/model1/processed_live"
+    data_dir: str
     save_dir_root: str = "runs/bandvae"
 
     # Data processing (paper: T = 150 frames @ 30 fps)
@@ -71,6 +80,7 @@ class Config:
     device: str = "cuda"
     num_workers: int = 8
     pin_memory: bool = True
+    dtype: torch.dtype = torch.float16
 
     # ------------------------------------------------------------------
     # Mode‑specific settings (filled in __init__)
@@ -86,10 +96,13 @@ class Config:
     save_dir: str
 
     # ------------------------------------------------------------------
-    def __init__(self, mode: str = "simple"):
+    def __init__(self, mode: str = "simple", data_dir: str | None = None):
         mode = mode.lower()
         if mode not in {"full", "simple"}:
             raise ValueError(f"Invalid mode '{mode}'. Choose 'full' or 'simple'.")
+
+        # Data path (auto-resolves nested dataset layout)
+        self.data_dir = data_dir or _resolve_data_dir()
 
         # ------------------------------------------------------------------
         # Mode‑specific flags
@@ -126,6 +139,7 @@ class Config:
             f"Config (mode={self.feature_mode})",
             f"  Data: {self.data_dir}",
             f"  Save dir: {self.save_dir}",
+            f"  Device: {self.device}, dtype: {self.dtype}",
             f"  Frames per sample: {self.T_fixed} @ {self.fps} fps",
             f"  Features per landmark: {self.F_dim} ({'full' if self.feature_mode == 'full' else 'simple'})",
             f"  Input channels / band: {self.C_in_per_band}",
