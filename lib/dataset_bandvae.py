@@ -17,7 +17,7 @@ import os
 
 import numpy as np
 import torch
-from model_bandvae import ButterworthFilterBank
+from model import ButterworthFilterBank
 from torch.utils.data import Dataset
 
 # ============================================

@@ -25,6 +25,10 @@ Frequency-Decoupled Feature-Space VAE (Band-Split Version)
    → L1 reconstruction + KL divergence per band
 """
 
+import shutil
+from pathlib import Path
+from typing import List, Optional, Tuple
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -453,6 +457,439 @@ def compute_band_split_anomaly_score(
         score += recon + betas[band] * kl
 
     return score.squeeze() if score.size(0) == 1 else score
+
+
+# ============================================
+# Helpers for notebooks
+# ============================================
+
+
+def _has_npz(path: Path) -> bool:
+    return path.is_dir() and any(path.rglob("*.npz"))
+
+
+def _prepare_dataset(name: str, drive_root: Path, local_data: Path) -> Optional[Path]:
+    drive_zip = drive_root / f"{name}.zip"
+    local_zip = local_data / f"{name}.zip"
+    extract_dir = local_data / name
+    nested_dir = extract_dir / name
+
+    if drive_zip.exists():
+        if (
+            not local_zip.exists()
+            or drive_zip.stat().st_mtime > local_zip.stat().st_mtime
+        ):
+            shutil.copy2(drive_zip, local_zip)
+            print(f"Copied {drive_zip.name} from Drive to local cache.")
+
+    if not _has_npz(extract_dir) and not _has_npz(nested_dir) and local_zip.exists():
+        shutil.unpack_archive(str(local_zip), str(local_data))
+        try:
+            local_zip.unlink()
+            print(f"Removed {local_zip} after extraction.")
+        except OSError as exc:
+            print(f"Warning: could not remove {local_zip}: {exc}")
+
+    if _has_npz(nested_dir):
+        return nested_dir
+    if _has_npz(extract_dir):
+        return extract_dir
+    return extract_dir if extract_dir.exists() else None
+
+
+def _prepare_dataset_with_fallback(
+    names: List[str], drive_root: Path, local_data: Path
+) -> Tuple[Optional[Path], Optional[str]]:
+    for candidate in names:
+        path = _prepare_dataset(candidate, drive_root, local_data)
+        if path is not None and _has_npz(path):
+            return path, candidate
+    return None, None
+
+
+def _gather_pairs(root: Path, split: str) -> Optional[List[Tuple[str, int]]]:
+    split_dir = root / split
+    real_dir = split_dir / "real"
+    fake_dir = split_dir / "fake"
+    real = sorted(real_dir.glob("*.npz")) if real_dir.exists() else []
+    fake = sorted(fake_dir.glob("*.npz")) if fake_dir.exists() else []
+    if real and fake:
+        return [(str(p), 0) for p in real] + [(str(p), 1) for p in fake]
+    return None
+
+
+def setup_data_paths(
+    pretrain_dataset: str,
+    finetune_dataset: str,
+    drive_root: Path,
+    local_data: Path,
+) -> Tuple[Path, Path, List[Tuple[str, int]], List[Tuple[str, int]]]:
+    pretrain_root, pretrain_used = _prepare_dataset_with_fallback(
+        [pretrain_dataset], drive_root, local_data
+    )
+    finetune_root, finetune_used = _prepare_dataset_with_fallback(
+        [finetune_dataset, "preprocessed"], drive_root, local_data
+    )
+
+    if pretrain_root is None or not _has_npz(pretrain_root):
+        raise FileNotFoundError(
+            f"No pretrain dataset '{pretrain_dataset}' found under {drive_root} or {local_data}"
+        )
+
+    if finetune_root is None:
+        raise FileNotFoundError(
+            f"No finetune dataset '{finetune_dataset}' found under {drive_root} or {local_data}"
+        )
+
+    pretrain_data_dir = pretrain_root
+    if (pretrain_root / "train" / "real").exists():
+        pretrain_data_dir = pretrain_root / "train" / "real"
+
+    finetune_train_pairs = _gather_pairs(finetune_root, "train")
+    finetune_val_pairs = _gather_pairs(finetune_root, "test") or _gather_pairs(
+        finetune_root, "val"
+    )
+
+    if finetune_train_pairs is None:
+        raise FileNotFoundError(
+            f"Expected '{finetune_dataset}' to provide train/real and train/fake splits."
+        )
+    if finetune_val_pairs is None:
+        split_idx = max(1, len(finetune_train_pairs) // 10)
+        finetune_train_pairs, finetune_val_pairs = (
+            finetune_train_pairs[:-split_idx],
+            finetune_train_pairs[-split_idx:],
+        )
+
+    if finetune_used and finetune_used != finetune_dataset:
+        print(
+            f"Finetune dataset '{finetune_dataset}' missing; using '{finetune_used}' instead."
+        )
+
+    return pretrain_data_dir, finetune_root, finetune_train_pairs, finetune_val_pairs
+
+
+def validate_stage1(model, loader, device, train_dtype, use_amp):
+    model.eval()
+    total_loss = lf_rec = bp_rec = hf_rec = 0.0
+    n_batches = len(loader)
+    for x_lf, x_bp, x_hf in loader:
+        x_lf = x_lf.to(device, dtype=train_dtype)
+        x_bp = x_bp.to(device, dtype=train_dtype)
+        x_hf = x_hf.to(device, dtype=train_dtype)
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            recons, mus, logvars, x_hat_fused = model(x_lf, x_bp, x_hf)
+            targets = {"lf": x_lf, "bp": x_bp, "hf": x_hf}
+            betas = {"lf": 1.0, "bp": 1.0, "hf": 1.0}
+            loss, loss_dict = band_split_vae_loss(
+                recons,
+                mus,
+                logvars,
+                targets,
+                x_hat_fused,
+                None,
+                betas=betas,
+                alpha_fusion=0.0,
+            )
+        total_loss += loss_dict["total"]
+        lf_rec += loss_dict["recon_lf"]
+        bp_rec += loss_dict["recon_bp"]
+        hf_rec += loss_dict["recon_hf"]
+    return {
+        "total": total_loss / n_batches,
+        "lf_rec": lf_rec / n_batches,
+        "bp_rec": bp_rec / n_batches,
+        "hf_rec": hf_rec / n_batches,
+    }
+
+
+def train_epoch_stage1(model, loader, optimizer, device, train_dtype, use_amp, scaler):
+    model.train()
+    total_loss = lf_rec = bp_rec = hf_rec = 0.0
+    n_batches = len(loader)
+    for x_lf, x_bp, x_hf in loader:
+        x_lf = x_lf.to(device, dtype=train_dtype)
+        x_bp = x_bp.to(device, dtype=train_dtype)
+        x_hf = x_hf.to(device, dtype=train_dtype)
+        optimizer.zero_grad(set_to_none=True)
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            recons, mus, logvars, x_hat_fused = model(x_lf, x_bp, x_hf)
+            targets = {"lf": x_lf, "bp": x_bp, "hf": x_hf}
+            betas = {"lf": 1.0, "bp": 1.0, "hf": 1.0}
+            loss, loss_dict = band_split_vae_loss(
+                recons,
+                mus,
+                logvars,
+                targets,
+                x_hat_fused,
+                None,
+                betas=betas,
+                alpha_fusion=0.0,
+            )
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+        total_loss += loss_dict["total"]
+        lf_rec += loss_dict["recon_lf"]
+        bp_rec += loss_dict["recon_bp"]
+        hf_rec += loss_dict["recon_hf"]
+    return {
+        "total": total_loss / n_batches,
+        "lf_rec": lf_rec / n_batches,
+        "bp_rec": bp_rec / n_batches,
+        "hf_rec": hf_rec / n_batches,
+    }
+
+
+def margin_loss(real_loss, fake_loss, margin=0.5, lambda_margin=1.0):
+    loss_fake = torch.clamp(margin - fake_loss, min=0.0)
+    return real_loss + lambda_margin * loss_fake
+
+
+def validate_margin(model, loader, device, train_dtype, use_amp, margin):
+    model.eval()
+    total_loss = real_rec = fake_rec = 0.0
+    n_real = n_fake = 0
+    for x_lf, x_bp, x_hf, labels in loader:
+        x_lf = x_lf.to(device, dtype=train_dtype)
+        x_bp = x_bp.to(device, dtype=train_dtype)
+        x_hf = x_hf.to(device, dtype=train_dtype)
+        labels = labels.to(device)
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            recons, mus, logvars, x_hat_fused = model(x_lf, x_bp, x_hf)
+            targets = {"lf": x_lf, "bp": x_bp, "hf": x_hf}
+            betas = {"lf": 1.0, "bp": 1.0, "hf": 1.0}
+            for i in range(x_lf.size(0)):
+                single_recons = {k: v[i : i + 1] for k, v in recons.items()}
+                single_mus = {k: v[i : i + 1] for k, v in mus.items()}
+                single_logvars = {k: v[i : i + 1] for k, v in logvars.items()}
+                single_targets = {k: v[i : i + 1] for k, v in targets.items()}
+                single_x_hat = (
+                    x_hat_fused[i : i + 1] if x_hat_fused is not None else None
+                )
+                _, loss_dict = band_split_vae_loss(
+                    single_recons,
+                    single_mus,
+                    single_logvars,
+                    single_targets,
+                    single_x_hat,
+                    None,
+                    betas=betas,
+                    alpha_fusion=0.0,
+                )
+                if labels[i] == 0:
+                    real_rec += loss_dict["total"]
+                    n_real += 1
+                else:
+                    fake_rec += loss_dict["total"]
+                    n_fake += 1
+    real_mean = real_rec / max(n_real, 1)
+    fake_mean = fake_rec / max(n_fake, 1)
+    total = margin_loss(real_mean, fake_mean, margin)
+    return {
+        "total": float(total),
+        "real_rec": float(real_mean),
+        "fake_rec": float(fake_mean),
+        "separation": float(fake_mean - real_mean),
+    }
+
+
+def train_epoch_margin(
+    model,
+    loader,
+    optimizer,
+    device,
+    train_dtype,
+    use_amp,
+    margin,
+    lambda_margin,
+    scaler,
+):
+    model.train()
+    total_loss = real_rec = fake_rec = 0.0
+    n_real = n_fake = 0
+    n_batches = len(loader)
+    for x_lf, x_bp, x_hf, labels in loader:
+        x_lf = x_lf.to(device, dtype=train_dtype)
+        x_bp = x_bp.to(device, dtype=train_dtype)
+        x_hf = x_hf.to(device, dtype=train_dtype)
+        labels = labels.to(device)
+        optimizer.zero_grad(set_to_none=True)
+        real_mask = labels == 0
+        fake_mask = labels == 1
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            recons, mus, logvars, x_hat_fused = model(x_lf, x_bp, x_hf)
+            targets = {"lf": x_lf, "bp": x_bp, "hf": x_hf}
+            betas = {"lf": 1.0, "bp": 1.0, "hf": 1.0}
+            if real_mask.any():
+                real_loss, real_dict = band_split_vae_loss(
+                    {k: v[real_mask] for k, v in recons.items()},
+                    {k: v[real_mask] for k, v in mus.items()},
+                    {k: v[real_mask] for k, v in logvars.items()},
+                    {k: v[real_mask] for k, v in targets.items()},
+                    x_hat_fused[real_mask] if x_hat_fused is not None else None,
+                    None,
+                    betas=betas,
+                    alpha_fusion=0.0,
+                )
+            else:
+                real_loss, real_dict = torch.zeros(1, device=device), {"total": 0.0}
+            if fake_mask.any():
+                fake_loss, fake_dict = band_split_vae_loss(
+                    {k: v[fake_mask] for k, v in recons.items()},
+                    {k: v[fake_mask] for k, v in mus.items()},
+                    {k: v[fake_mask] for k, v in logvars.items()},
+                    {k: v[fake_mask] for k, v in targets.items()},
+                    x_hat_fused[fake_mask] if x_hat_fused is not None else None,
+                    None,
+                    betas=betas,
+                    alpha_fusion=0.0,
+                )
+            else:
+                fake_loss, fake_dict = torch.zeros(1, device=device), {"total": 0.0}
+            loss = margin_loss(real_loss, fake_loss, margin, lambda_margin)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+        total_loss += loss.item()
+        real_rec += float(real_dict["total"])
+        fake_rec += float(fake_dict["total"])
+        n_real += real_mask.sum().item()
+        n_fake += fake_mask.sum().item()
+    return {
+        "total": total_loss / n_batches,
+        "real_rec": real_rec / n_batches,
+        "fake_rec": fake_rec / n_batches,
+        "separation": (fake_rec - real_rec) / n_batches,
+    }
+
+
+def validate_disc(
+    model, discriminator, loader, device, train_dtype, use_amp, criterion
+):
+    model.eval()
+    discriminator.eval()
+    total_loss = rec_loss = cls_loss = 0.0
+    n_batches = len(loader)
+    correct = total = 0
+    for x_lf, x_bp, x_hf, labels in loader:
+        x_lf = x_lf.to(device, dtype=train_dtype)
+        x_bp = x_bp.to(device, dtype=train_dtype)
+        x_hf = x_hf.to(device, dtype=train_dtype)
+        labels = labels.to(device).float()
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            recons, mus, logvars, x_hat_fused = model(x_lf, x_bp, x_hf)
+            targets = {"lf": x_lf, "bp": x_bp, "hf": x_hf}
+            betas = {"lf": 1.0, "bp": 1.0, "hf": 1.0}
+            loss, loss_dict = band_split_vae_loss(
+                recons,
+                mus,
+                logvars,
+                targets,
+                x_hat_fused,
+                None,
+                betas=betas,
+                alpha_fusion=0.0,
+            )
+            logits = discriminator(mus["lf"], mus["bp"], mus["hf"]).squeeze(1)
+            cls = criterion(logits, labels)
+            total_batch = loss + cls
+        total_loss += total_batch.item()
+        rec_loss += loss_dict["total"]
+        cls_loss += cls.item()
+        preds = (torch.sigmoid(logits) > 0.5).long()
+        correct += (preds == labels.long()).sum().item()
+        total += labels.size(0)
+    acc = correct / total if total else 0.0
+    return {
+        "total": total_loss / n_batches,
+        "rec": rec_loss / n_batches,
+        "cls": cls_loss / n_batches,
+        "accuracy": acc,
+    }
+
+
+def train_epoch_disc(
+    model,
+    discriminator,
+    loader,
+    optimizer,
+    device,
+    train_dtype,
+    use_amp,
+    criterion,
+    scaler,
+):
+    model.train()
+    discriminator.train()
+    total_loss = rec_loss = cls_loss = 0.0
+    n_batches = len(loader)
+    correct = total = 0
+    for x_lf, x_bp, x_hf, labels in loader:
+        x_lf = x_lf.to(device, dtype=train_dtype)
+        x_bp = x_bp.to(device, dtype=train_dtype)
+        x_hf = x_hf.to(device, dtype=train_dtype)
+        labels = labels.to(device).float()
+        optimizer.zero_grad(set_to_none=True)
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            recons, mus, logvars, x_hat_fused = model(x_lf, x_bp, x_hf)
+            targets = {"lf": x_lf, "bp": x_bp, "hf": x_hf}
+            betas = {"lf": 1.0, "bp": 1.0, "hf": 1.0}
+            loss, loss_dict = band_split_vae_loss(
+                recons,
+                mus,
+                logvars,
+                targets,
+                x_hat_fused,
+                None,
+                betas=betas,
+                alpha_fusion=0.0,
+            )
+            logits = discriminator(mus["lf"], mus["bp"], mus["hf"]).squeeze(1)
+            cls = criterion(logits, labels)
+            total_batch = loss + cls
+        scaler.scale(total_batch).backward()
+        scaler.step(optimizer)
+        scaler.update()
+        total_loss += total_batch.item()
+        rec_loss += loss_dict["total"]
+        cls_loss += cls.item()
+        preds = (torch.sigmoid(logits) > 0.5).long()
+        correct += (preds == labels.long()).sum().item()
+        total += labels.size(0)
+    acc = correct / total if total else 0.0
+    return {
+        "total": total_loss / n_batches,
+        "rec": rec_loss / n_batches,
+        "cls": cls_loss / n_batches,
+        "accuracy": acc,
+    }
+
+
+class LatentDiscriminator(nn.Module):
+    def __init__(self, C_z, num_bands=3, hidden_dim=128):
+        super().__init__()
+        input_dim = C_z * 2 * num_bands
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(hidden_dim // 2, 1),
+        )
+
+    def forward(self, z_lf, z_bp, z_hf):
+        def pool(z):
+            if z.dim() == 3:
+                z_avg = z.mean(dim=2)
+                z_max = z.max(dim=2)[0]
+                return torch.cat([z_avg, z_max], dim=1)
+            return z
+
+        z_concat = torch.cat([pool(z_lf), pool(z_bp), pool(z_hf)], dim=1)
+        return self.net(z_concat)
 
 
 # ============================================
