@@ -527,8 +527,11 @@ def setup_data_paths(
     pretrain_root, pretrain_used = _prepare_dataset_with_fallback(
         [pretrain_dataset], drive_root, local_data
     )
+    finetune_candidates = [finetune_dataset, "preprocessed"]
+    if pretrain_dataset not in finetune_candidates:
+        finetune_candidates.append(pretrain_dataset)
     finetune_root, finetune_used = _prepare_dataset_with_fallback(
-        [finetune_dataset, "preprocessed"], drive_root, local_data
+        finetune_candidates, drive_root, local_data
     )
 
     if pretrain_root is None or not _has_npz(pretrain_root):
